@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""hub: CLI for claude-hub, used by agents (via Bash) and by Claude Code hooks.
+
+Env:  HUB_AGENT  this agent's name (e.g. backend)   HUB_URL  default http://localhost:8765
+
+Agent commands
+  hub say  "text"            broadcast to everyone (contracts, decisions, what you're working on)
+  hub ask  AGENT "question"  ask another agent; returns immediately, the answer arrives later
+  hub reply AGENT "answer"   answer a question
+  hub help "question"        escalate to YOUR human (desktop notification)
+  hub inbox                  print unread messages now
+  hub log [-f]               print all messages (-f: follow)
+  hub reset                  wipe the hub
+
+Hook commands (read hook JSON on stdin)
+  hub inject                 SessionStart / UserPromptSubmit / PostToolUse: add unread messages to context
+  hub wait                   Stop hook with asyncRewake: block until a message arrives, then exit 2 to wake Claude
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+
+URL = os.environ.get("HUB_URL", "http://localhost:8765").rstrip("/")
+ME = os.environ.get("HUB_AGENT", "")
+
+
+def call(method, path, body=None, timeout=5):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def post(kind, to, text):
+    if not ME:
+        sys.exit("hub: set HUB_AGENT to this agent's name")
+    m = call("POST", "/post", {"from": ME, "to": to, "kind": kind, "text": text})
+    print("sent #%d %s → %s" % (m["id"], kind, to))
+
+
+def fmt(msgs):
+    lines = []
+    for m in msgs:
+        line = "[hub #%d] %s from %s → %s: %s" % (m["id"], m["kind"], m["from"], m["to"], m["text"])
+        if m["kind"] == "ask":
+            line += '\n  → answer with: hub reply %s "..."' % m["from"]
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def hook_input():
+    try:
+        return json.load(sys.stdin)
+    except ValueError:
+        return {}
+
+
+def inject():
+    # Hooks must never break the session: stay silent on any failure.
+    if not ME:
+        return
+    event = hook_input().get("hook_event_name", "UserPromptSubmit")
+    try:
+        msgs = call("GET", "/feed?agent=" + ME, timeout=3)
+    except Exception:
+        msgs = []
+    parts = []
+    if event == "SessionStart":
+        parts.append("You are agent '%s' on claude-hub, shared with other Claude agents on "
+                     "other laptops. See CLAUDE.md for the protocol." % ME)
+    if msgs:
+        parts.append("New messages from other agents:\n" + fmt(msgs))
+    if parts:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                                 "additionalContext": "\n\n".join(parts)}}))
+
+
+def wait():
+    # Stop hook with asyncRewake: exit 2 + stderr wakes the idle session with that text.
+    if not ME:
+        return 0
+    hook_input()
+    deadline = time.time() + 570  # stay under the 600s hook timeout
+    while time.time() < deadline:
+        try:
+            msgs = call("GET", "/wait?agent=%s&timeout=50" % ME, timeout=60)
+        except Exception:
+            time.sleep(5)
+            continue
+        if msgs:
+            sys.stderr.write("Messages from other agents arrived while you were idle. "
+                             "Act on them (answer questions with hub reply), then continue.\n"
+                             + fmt(msgs) + "\n")
+            return 2
+    return 0
+
+
+def log(follow):
+    seen = 0
+    while True:
+        data = call("GET", "/log")
+        for m in data["messages"][seen:]:
+            print("%s %-5s %s → %s: %s" % (time.strftime("%H:%M:%S", time.localtime(m["ts"])),
+                                           m["kind"], m["from"], m["to"], m["text"]), flush=True)
+        seen = len(data["messages"])
+        if not follow:
+            return
+        time.sleep(1)
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, args = argv[0], argv[1:]
+    if cmd == "say" and args:
+        post("say", "all", " ".join(args))
+    elif cmd in ("ask", "reply") and len(args) >= 2:
+        post(cmd, args[0], " ".join(args[1:]))
+    elif cmd == "help" and args:
+        text = " ".join(args)
+        post("help", "all", text)
+        subprocess.run(["osascript", "-e", 'display notification %s with title "Claude (%s) needs you" sound name "Glass"'
+                        % (json.dumps(text), ME)], check=False)
+        print("Your human has been notified. Keep working on anything not blocked by this.")
+    elif cmd == "inbox":
+        msgs = call("GET", "/feed?agent=" + ME)
+        print(fmt(msgs) if msgs else "no new messages")
+    elif cmd == "log":
+        log("-f" in args)
+    elif cmd == "reset":
+        call("POST", "/reset")
+        print("hub reset")
+    elif cmd == "inject":
+        inject()
+    elif cmd == "wait":
+        return wait()
+    else:
+        print(__doc__)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
