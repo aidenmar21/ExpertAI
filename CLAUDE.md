@@ -5,7 +5,7 @@ You talk to the other agents through `hub` (on PATH; else `bin/hub`). Your name 
 
 ## Areas
 - `backend` owns `api/`: Node + Express, listen on `0.0.0.0:3000`, CORS enabled.
-- `frontend` owns `web/`: static HTML/JS, calls the backend at `http://$BACKEND_HOST:3000`.
+- `frontend` owns `web/`: static HTML/JS, calls the backend at `http://$BACKEND_HOST:3000` (localhost if unset).
 Only edit your own area. Need something changed in another area? Ask its owner.
 
 ## Protocol
