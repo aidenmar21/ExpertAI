@@ -3,8 +3,17 @@
 
 Env:  HUB_AGENT  this agent's name (e.g. backend)   HUB_URL  default http://localhost:8765
 
+Board commands (the shared plan)
+  hub board                  show the goal, every part, who owns it, and interfaces
+  hub goal "text"            set the team goal, including what "done" means
+  hub part ID "description"  add/update a part; ID is also its top-level folder (e.g. api, web)
+  hub claim ID               take ownership of a part (fails if a friend already has it)
+  hub contract ID "iface"    publish the part's interface others build against
+  hub status "text"          your one-line "what I'm doing now" for the dashboard
+  hub done ID "summary"      mark your part done (only when it meets the goal's definition of done)
+
 Agent commands
-  hub say  "text"            broadcast to everyone (contracts, decisions, what you're working on)
+  hub say  "text"            broadcast to everyone (decisions, heads-ups)
   hub ask  AGENT "question"  ask another agent; returns immediately, the answer arrives later
   hub reply AGENT "answer"   answer a question
   hub help "question"        escalate to YOUR human (desktop notification)
@@ -21,6 +30,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 URL = os.environ.get("HUB_URL", "http://localhost:8765").rstrip("/")
@@ -40,6 +50,31 @@ def post(kind, to, text):
         sys.exit("hub: set HUB_AGENT to this agent's name")
     m = call("POST", "/post", {"from": ME, "to": to, "kind": kind, "text": text})
     print("sent #%d %s → %s" % (m["id"], kind, to))
+
+
+def board_cmd(action, pid="", text=""):
+    if not ME:
+        sys.exit("hub: set HUB_AGENT to this agent's name")
+    try:
+        call("POST", "/board", {"from": ME, "action": action, "id": pid, "text": text})
+    except urllib.error.HTTPError as e:
+        sys.exit("hub: " + json.loads(e.read()).get("error", str(e)))
+    print("ok: %s %s" % (action, pid))
+
+
+def fmt_board(b):
+    if not b["goal"]:
+        return "No goal set yet. Someone sets it with: hub goal \"...\""
+    lines = ["GOAL (set by %s): %s" % (b["goal"]["by"], b["goal"]["text"])]
+    if not b["parts"]:
+        lines.append("No parts yet: the goal-setter's agent proposes them with hub part.")
+    for p in b["parts"]:
+        lines.append("- %s/ [%s%s] %s" % (p["id"], p["status"], ", " + p["owner"] if p["owner"] else "", p["desc"]))
+        if p["contract"]:
+            lines.append("    interface: " + p["contract"])
+    for agent, st in b["statuses"].items():
+        lines.append("* %s is: %s" % (agent, st))
+    return "\n".join(lines)
 
 
 def fmt(msgs):
@@ -66,12 +101,15 @@ def inject():
     event = hook_input().get("hook_event_name", "UserPromptSubmit")
     try:
         msgs = call("GET", "/feed?agent=" + ME, timeout=3)
+        b = call("GET", "/board", timeout=3) if event in ("SessionStart", "UserPromptSubmit") else None
     except Exception:
-        msgs = []
+        msgs, b = [], None
     parts = []
     if event == "SessionStart":
         parts.append("You are agent '%s' on Claude with Friends, working alongside other Claude agents on "
                      "other laptops. See CLAUDE.md for the protocol." % ME)
+    if b:
+        parts.append("Team board:\n" + fmt_board(b))
     if msgs:
         parts.append("New messages from other agents:\n" + fmt(msgs))
     if parts:
@@ -127,6 +165,14 @@ def main(argv):
         subprocess.run(["osascript", "-e", 'display notification %s with title "Claude (%s) needs you" sound name "Glass"'
                         % (json.dumps(text), ME)], check=False)
         print("Your human has been notified. Keep working on anything not blocked by this.")
+    elif cmd == "board":
+        print(fmt_board(call("GET", "/board")))
+    elif cmd in ("goal", "status") and args:
+        board_cmd(cmd, text=" ".join(args))
+    elif cmd == "claim" and len(args) == 1:
+        board_cmd("claim", args[0])
+    elif cmd in ("part", "contract", "done") and args:
+        board_cmd(cmd, args[0], " ".join(args[1:]))
     elif cmd == "inbox":
         msgs = call("GET", "/feed?agent=" + ME)
         print(fmt(msgs) if msgs else "no new messages")
