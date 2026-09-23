@@ -4,169 +4,349 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude with Friends</title>
+<link rel="icon" id="favicon">
 <style>
   :root {
-    --bg: #0a0f1c; --bg2: #0e1526; --panel: rgba(148, 163, 184, .06); --line: rgba(148, 163, 184, .14);
-    --text: #e2e8f0; --muted: #8391a7; --faint: #55627a;
-    --say: #38bdf8; --ask: #818cf8; --reply: #2dd4bf; --help: #f472b6;
-    --glow: radial-gradient(1200px 600px at 10% -10%, rgba(56, 189, 248, .12), transparent 60%),
-            radial-gradient(900px 500px at 110% 0%, rgba(129, 140, 248, .12), transparent 60%);
+    --bg: #faf9f5; --panel: #ffffff; --panel-2: #f0eee6; --line: #e8e6dc; --text: #141413; --muted: #6b6a64; --faint: #a3a198;
+    --clay: #d97757; --clay-soft: rgba(217, 119, 87, .12);
+    --say: #0284c7; --ask: #4f46e5; --reply: #0d9488; --help: #c2410c; --plan: #6b6a64;
+    --stage: #f0eee6; --eye: #141413;
+    --serif: ui-serif, "Tiempos Headline", "Copernicus", Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Styrene A", "SF Pro Text", "Inter", "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
-  @media (prefers-color-scheme: light) {
+  @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #f4f7fb; --bg2: #e9eef6; --panel: rgba(255, 255, 255, .85); --line: rgba(15, 23, 42, .08);
-      --text: #0f172a; --muted: #5b6b82; --faint: #94a3b8;
-      --say: #0284c7; --ask: #4f46e5; --reply: #0d9488; --help: #db2777;
-      --glow: radial-gradient(1200px 600px at 10% -10%, rgba(56, 189, 248, .16), transparent 60%),
-              radial-gradient(900px 500px at 110% 0%, rgba(129, 140, 248, .16), transparent 60%);
+      --bg: #262624; --panel: #30302e; --panel-2: #2b2b29; --line: #3e3e3a; --text: #faf9f5; --muted: #a6a39a; --faint: #75736b;
+      --clay-soft: rgba(217, 119, 87, .16);
+      --say: #38bdf8; --ask: #818cf8; --reply: #2dd4bf; --help: #fb923c; --plan: #a6a39a;
+      --stage: #1f1e1d; --eye: #141413;
     }
   }
   * { box-sizing: border-box; }
-  html { min-height: 100%; background: var(--glow), linear-gradient(var(--bg), var(--bg2)); background-attachment: fixed; }
-  body { margin: 0; color: var(--text); -webkit-font-smoothing: antialiased;
-         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; backdrop-filter: blur(8px); }
-  h2 { font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--text); font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+  h2 { font: 600 12px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
 
-  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-  .brand { display: flex; align-items: center; gap: 14px; }
-  .logo { position: relative; width: 44px; height: 32px; flex: none; }
-  .logo i { position: absolute; top: 0; width: 32px; height: 32px; border-radius: 50%; mix-blend-mode: screen; opacity: .9; }
-  .logo i:first-child { left: 0; background: var(--say); }
-  .logo i:last-child { right: 0; background: var(--ask); }
-  @media (prefers-color-scheme: light) { .logo i { mix-blend-mode: multiply; opacity: .75; } }
-  h1 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
-  .sub { color: var(--muted); font-size: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand svg { width: 40px; height: 40px; }
+  h1 { font: 500 26px/1.1 var(--serif); letter-spacing: -.01em; margin: 0; }
   .live { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
-  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--reply); animation: pulse 2s infinite; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--clay); animation: pulse 2s infinite; }
   .live.off::before { background: var(--faint); animation: none; }
 
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
-  .stat { padding: 14px 16px; }
-  .stat .n { font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--k); }
-  .stat .l { font-size: 13px; color: var(--muted); }
+  .hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .stage { position: relative; background: var(--stage); border-radius: 16px; border: 1px solid var(--line);
+           min-height: 300px; display: flex; flex-direction: column; overflow: hidden; }
+  .stage .scene { flex: 1; display: grid; place-items: center; padding: 12px; }
+  .stage .scene svg { width: min(100%, 360px); height: auto; }
+  .caption { padding: 12px 18px 16px; font: 400 17px/1.4 var(--serif); color: var(--text); text-align: center; min-height: 52px; }
+  .goalcard { padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .goal { font: 400 22px/1.35 var(--serif); letter-spacing: -.005em; }
+  .goal.empty { color: var(--muted); }
+  .goal-by { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .progress { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--clay); border-radius: 999px; transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: auto; }
+  .stat .n { font: 500 30px/1 var(--serif); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
-  .friends, .open { padding: 16px; }
-  #friends { display: flex; flex-direction: column; gap: 10px; }
-  .friend { display: flex; align-items: center; gap: 12px; }
+  .parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .part { padding: 16px; display: flex; flex-direction: column; gap: 8px; transition: border-color .3s; }
+  .part.done { border-color: color-mix(in srgb, var(--reply) 50%, var(--line)); }
+  .part .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .part .id { font: 600 15px var(--mono); }
+  .part .desc { color: var(--muted); font-size: 14px; }
+  .part .owner { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .part .owner .st { color: var(--muted); }
+  .iface { font: 12px/1.5 var(--mono); color: var(--text); background: var(--panel-2); padding: 8px 10px; border-radius: 8px; word-break: break-word; }
+  .pill { padding: 2px 9px; border-radius: 999px; font: 600 11px/1.6 var(--sans); letter-spacing: .04em; text-transform: uppercase;
+          color: var(--k); background: color-mix(in srgb, var(--k) 13%, transparent); white-space: nowrap; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .panel { padding: 18px; }
+  .friend { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
   .friend .name { font-weight: 600; }
-  .friend .state { font-size: 12px; color: var(--muted); }
-  .friend.on .state { color: var(--reply); }
-  #open { display: flex; flex-direction: column; gap: 8px; }
-  .q { font-size: 14px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--ask) 10%, transparent); }
+  .friend .state { font-size: 13px; color: var(--muted); }
+  .friend.on .dot { background: var(--reply); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .q { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--ask) 9%, transparent); margin-bottom: 8px; }
   .q b { color: var(--ask); font-weight: 600; }
   .none { color: var(--muted); font-size: 14px; }
 
-  .av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-        font-weight: 700; font-size: 14px; color: #0a0f1c; background: var(--c); }
-  .friend.on .av { box-shadow: 0 0 0 3px color-mix(in srgb, var(--reply) 35%, transparent); }
+  .av { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--clay-soft); }
+  .av svg { width: 22px; height: 22px; }
 
-  #feed { display: flex; flex-direction: column; gap: 10px; }
-  .msg { display: flex; gap: 14px; padding: 16px 18px; animation: in .35s cubic-bezier(.2, .8, .2, 1); }
-  .msg.help { border-color: color-mix(in srgb, var(--help) 55%, transparent); background: color-mix(in srgb, var(--help) 10%, var(--panel)); }
-  .body { min-width: 0; flex: 1; }
-  .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
-  .top b { color: var(--text); font-weight: 600; }
-  .pill { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
-          color: var(--k); background: color-mix(in srgb, var(--k) 14%, transparent); }
+  #feed { display: flex; flex-direction: column; gap: 8px; }
+  .msg { display: flex; gap: 12px; padding: 14px 16px; animation: in .35s cubic-bezier(.2, .8, .2, 1); }
+  .msg.k-help { border-color: color-mix(in srgb, var(--help) 50%, var(--line)); background: color-mix(in srgb, var(--help) 7%, var(--panel)); }
+  .msg.k-shipped, .msg.k-goal { background: var(--clay-soft); border-color: color-mix(in srgb, var(--clay) 40%, var(--line)); }
+  .msg .body { min-width: 0; flex: 1; }
+  .msg .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; font-size: 13px; color: var(--muted); }
+  .msg .meta b { color: var(--text); font-weight: 600; }
   .time { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .text { font-size: 16px; white-space: pre-wrap; word-break: break-word; }
-  .empty { text-align: center; color: var(--muted); padding: 56px 16px; border: 1px dashed var(--line); border-radius: 16px; }
-  .empty code { color: var(--say); }
+  .text { font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 16px; border: 1px dashed var(--line); border-radius: 16px; }
+  code { font-family: var(--mono); color: var(--clay); }
 
-  @keyframes in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, .5); } 70% { box-shadow: 0 0 0 8px rgba(45, 212, 191, 0); } 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); } }
-  @media (max-width: 640px) {
-    .row { grid-template-columns: 1fr; }
-    .stat .n { font-size: 22px; }
+  /* ---- pixel scene animations ---- */
+  .scene g { transform-box: fill-box; }
+  .hop { transform-origin: 50% 100%; animation: hop 1.8s ease-in-out infinite; }
+  .hop.d1 { animation-delay: .3s; } .hop.d2 { animation-delay: .6s; }
+  .bob { transform-origin: 50% 100%; animation: bob 3s ease-in-out infinite; }
+  .bob.d1 { animation-delay: 1.5s; }
+  .beat { transform-origin: 50% 50%; animation: beat 1.2s ease-in-out infinite; }
+  .blink { transform-origin: 50% 50%; animation: blink 4.5s infinite; }
+  .flick1 { transform-origin: 50% 100%; animation: flick 0.9s ease-in-out infinite alternate; }
+  .flick2 { transform-origin: 50% 100%; animation: flick 0.7s ease-in-out infinite alternate-reverse; }
+  .rise { animation: rise 2.6s linear infinite; opacity: 0; }
+  .rise.d1 { animation-delay: .9s; } .rise.d2 { animation-delay: 1.7s; }
+  .zz { animation: zz 3s ease-in-out infinite; opacity: 0; }
+  .zz.d1 { animation-delay: 1.5s; }
+  .pop { transform-origin: 30% 100%; animation: pop .45s cubic-bezier(.3, 1.6, .5, 1) both; }
+  .pop.late { animation-delay: .9s; }
+  .fly { animation: fly 1.4s cubic-bezier(.4, 0, .2, 1) both; }
+  .wake-eyes-closed { animation: hideAt 1.4s steps(1) both; }
+  .wake-eyes-open { animation: showAt 1.4s steps(1) both; }
+  .jolt { transform-origin: 50% 100%; animation: jolt .5s ease-out 1.35s both; }
+  .armA { animation: armA .5s steps(1) infinite; } .armB { animation: armB .5s steps(1) infinite; }
+  .fall { animation: fall 2.4s linear infinite; }
+  .fall.d1 { animation-delay: .6s; } .fall.d2 { animation-delay: 1.2s; } .fall.d3 { animation-delay: 1.8s; }
+  .cheer { transform-origin: 50% 100%; animation: hop .5s ease-in-out infinite; }
+
+  @keyframes hop { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-3px); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.6px); } }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 20% { transform: scale(1.15); } 40% { transform: scale(1); } }
+  @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+  @keyframes flick { from { transform: scale(1, 1); } to { transform: scale(.94, 1.08); } }
+  @keyframes rise { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+  @keyframes zz { 0% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(3px, -6px); } }
+  @keyframes pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes fly { 0% { transform: translate(0, 0); opacity: 0; } 10% { opacity: 1; }
+                   50% { transform: translate(12px, -8px); } 95% { opacity: 1; } 100% { transform: translate(24px, 4px); opacity: 0; } }
+  @keyframes hideAt { 0% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes showAt { 0% { opacity: 0; } 100% { opacity: 1; } }
+  @keyframes jolt { 0% { transform: translateY(0); } 40% { transform: translateY(-3px); } 100% { transform: translateY(0); } }
+  @keyframes armA { 0% { opacity: 1; } 50% { opacity: 0; } }
+  @keyframes armB { 0% { opacity: 0; } 50% { opacity: 1; } }
+  @keyframes fall { 0% { transform: translateY(-4px); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(26px); opacity: 0; } }
+
+  @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(217, 119, 87, .5); } 70% { box-shadow: 0 0 0 8px rgba(217, 119, 87, 0); } 100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0); } }
+  @media (prefers-reduced-motion: reduce) { .scene * { animation: none !important; } }
+  @media (max-width: 760px) {
+    .hero, .row { grid-template-columns: 1fr; }
     .time { margin-left: 0; width: 100%; }
-    .text { font-size: 15px; }
+    .goal { font-size: 19px; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">
-      <div class="logo"><i></i><i></i></div>
-      <div><h1>Claude with Friends</h1><div class="sub">Your crew's Claudes, building one thing together</div></div>
-    </div>
+    <div class="brand"><span id="logo"></span><h1>Claude with Friends</h1></div>
     <div class="live" id="live">live</div>
   </header>
 
-  <section class="stats">
-    <div class="card stat" style="--k: var(--reply)"><div class="n" id="s-answered">0</div><div class="l">answered by agents</div></div>
-    <div class="card stat" style="--k: var(--ask)"><div class="n" id="s-open">0</div><div class="l">questions open</div></div>
-    <div class="card stat" style="--k: var(--help)"><div class="n" id="s-human">0</div><div class="l">times a human was needed</div></div>
+  <section class="hero">
+    <div class="stage"><div class="scene" id="scene"></div><div class="caption" id="caption"></div></div>
+    <div class="card goalcard">
+      <div><h2>The goal</h2><div class="goal empty" id="goal">No goal yet. Tell your Claude "our goal is …"</div><div class="goal-by" id="goal-by"></div></div>
+      <div><div class="progress"><i id="bar"></i></div><div class="goal-by" id="bar-l">No parts yet</div></div>
+      <div class="stats">
+        <div class="stat"><div class="n" id="s-answered">0</div><div class="l">answered by agents</div></div>
+        <div class="stat"><div class="n" id="s-open">0</div><div class="l">questions open</div></div>
+        <div class="stat"><div class="n" id="s-human">0</div><div class="l">humans needed</div></div>
+      </div>
+    </div>
   </section>
 
+  <h2>Parts</h2>
+  <section class="parts" id="parts"><div class="empty" style="grid-column: 1 / -1">The plan appears here once the goal is split into parts.</div></section>
+
   <section class="row">
-    <div class="card friends"><h2>Friends</h2><div id="friends"><div class="none">No one here yet</div></div></div>
-    <div class="card open"><h2>Waiting on an answer</h2><div id="open"><div class="none">Nothing waiting 🎉</div></div></div>
+    <div class="card panel"><h2>Friends</h2><div id="friends"><div class="none">No one here yet. Run <code>bin/agent yourname</code></div></div></div>
+    <div class="card panel"><h2>Waiting on an answer</h2><div id="open"><div class="none">Nothing waiting</div></div></div>
   </section>
 
   <h2>Conversation</h2>
-  <section id="feed"><div class="empty">Quiet so far. Invite a friend with <code>bin/agent backend</code></div></section>
+  <section id="feed"><div class="empty">Quiet so far.</div></section>
 </div>
 <script>
-const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-const PALETTE = ["#38bdf8", "#818cf8", "#2dd4bf", "#60a5fa", "#a78bfa", "#22d3ee"];
-const colorOf = n => { let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
-const av = n => `<div class="av" style="--c:${colorOf(n)}">${esc(n[0].toUpperCase())}</div>`;
-const ago = s => s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
-const LABEL = {say: "shared", ask: "asked", reply: "answered", help: "needs you"};
-let shown = 0;
+// ---------- pixel mascot kit (Claude Code character) ----------
+const C = { o: "#D97757", hi: "#E8896A", lo: "#B9603F", eye: "#141413", sky: "#38bdf8", ind: "#818cf8", teal: "#2dd4bf", log1: "#78716c", log2: "#57534e" };
+const R = (x, y, w, h, f, extra = "") => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${f}"${extra}/>`;
+const grid = (rows, x, y, s, f) => rows.flatMap((line, r) => [...line].map((ch, c) => ch === "#" ? R(x + c * s, y + r * s, s, s, f) : "")).join("");
+function eyes(x, y, s, kind) {
+  if (kind === "closed") return R(x + 2 * s, y + 2 * s, 2 * s, s, C.eye) + R(x + 6 * s, y + 2 * s, 2 * s, s, C.eye);
+  const d = { open: 0, right: 1, left: -1 }[kind];
+  return R(x + (3 + d) * s, y + s, s, 2 * s, C.eye) + R(x + (6 + d) * s, y + s, s, 2 * s, C.eye);
+}
+// arms: "LR" etc; up: sides raised; flap: sides that alternate up/down
+function mascot(x, y, s = 1, color = C.o, o = {}) {
+  const { eye = "open", arms = "LR", up = "", flap = "", cls = "", eyeCls = "blink", wakeEyes = false } = o;
+  let out = R(x + s, y, 8 * s, 5 * s, color);
+  for (const [side, col] of [["L", 0], ["R", 9]]) {
+    if (!arms.includes(side)) continue;
+    if (flap.includes(side)) out += `<g class="armA">${R(x + col * s, y + s, s, s, color)}</g><g class="armB">${R(x + col * s, y + 3 * s, s, s, color)}</g>`;
+    else out += R(x + col * s, y + (up.includes(side) ? 1 : 3) * s, s, s, color);
+  }
+  for (const col of [1, 3, 6, 8]) out += R(x + col * s, y + 5 * s, s, s, color);
+  out += wakeEyes
+    ? `<g class="wake-eyes-closed">${eyes(x, y, s, "closed")}</g><g class="wake-eyes-open">${eyes(x, y, s, "left")}</g>`
+    : `<g class="${eye === "closed" ? "" : eyeCls}">${eyes(x, y, s, eye)}</g>`;
+  return `<g class="${cls}">${out}</g>`;
+}
+const svg = (n, body) => `<svg viewBox="0 0 ${n} ${n * 0.72}" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+const HEART = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
+const Z = ["#####", "...#.", "..#..", ".#...", "#####"];
+const Q = ["###", "..#", ".##", "...", ".#."];
+const CHK = ["....#", "...#.", "#.#..", ".#..."];
+const SPARK = [".#.", "###", ".#."];
+const bubble = (x, y, w, h, f, tx, dir) => R(x + 1, y, w - 2, h, f) + R(x, y + 1, w, h - 2, f) + R(tx, y + h, 1, 1, f) + R(tx + dir, y + h + 1, 1, 1, f);
 
-// An ask from A to B counts as answered by the next reply from B to A.
+// Each scene: viewBox 40 x 28.8 (y offset -8 applied via translate so the originals fit)
+const SCENES = {
+  crew: () => svg(40, `<g transform="translate(0,-8)">
+      ${mascot(5, 21, 1, C.o, { eye: "right", cls: "hop" })}${mascot(15, 21, 1, C.hi, { cls: "hop d1" })}${mascot(25, 21, 1, C.o, { eye: "left", cls: "hop d2" })}
+      <g class="beat">${grid(HEART, 16.5, 11, 1, C.ind)}</g>${R(6, 28, 28, 1, C.teal, ' opacity=".35"')}</g>`),
+  campfire: () => svg(40, `<g transform="translate(0,-6)">
+      <g class="flick1">${grid(["...#...", "..##...", "..###..", ".####..", ".#####.", "#######", "#######", ".#####."], 14.75, 11, 1.5, C.ind)}</g>
+      <g class="flick2">${grid(["...#.", "..##.", ".###.", ".###.", "..#.."], 16.25, 15.5, 1.5, C.sky)}</g>
+      <g class="flick1">${grid([".#.", "###"], 17.75, 20, 1.5, C.teal)}</g>
+      ${R(13, 23, 14, 1.5, C.log1)}${R(14.5, 24.5, 11, 1.5, C.log2)}
+      ${mascot(1.5, 20, 1, C.o, { eye: "right", cls: "bob" })}${mascot(28.5, 20, 1, C.o, { eye: "left", cls: "bob d1" })}
+      <g class="rise">${R(19, 10, 1, 1, C.sky)}</g><g class="rise d1">${R(21, 11, 1, 1, C.teal)}</g><g class="rise d2">${R(18, 12, 1, 1, C.ind)}</g></g>`),
+  sleep: () => svg(40, `<g transform="translate(0,-10)">
+      ${mascot(4, 27, 1, C.lo, { eye: "closed", cls: "bob" })}${mascot(26, 27, 1, C.lo, { eye: "closed", cls: "bob d1" })}
+      <g class="zz">${grid(Z, 13, 20, 1, C.ind)}</g><g class="zz d1">${grid(Z, 35, 18, 1, C.ind)}</g>
+      ${R(2, 33, 36, 1, C.teal, ' opacity=".25"')}</g>`),
+  wake: () => svg(40, `<g transform="translate(0,-10)">
+      ${mascot(4, 27, 1, C.o, { eye: "right", flap: "R" })}
+      ${mascot(26, 27, 1, C.lo, { wakeEyes: true, cls: "jolt" })}
+      <g class="fly">${R(14, 26, 2, 2, C.sky)}</g>
+      <g class="zz">${grid(Z, 35, 18, 1, C.ind)}</g>
+      ${R(2, 33, 36, 1, C.teal, ' opacity=".25"')}</g>`),
+  ask: (answered) => svg(40, `<g transform="translate(0,-6)">
+      <g class="pop">${bubble(4, 7, 9, 9, C.sky, 7, -1)}${grid(Q, 7, 9, 1, C.eye)}</g>
+      ${answered ? `<g class="pop late">${bubble(27, 12, 9, 8, C.teal, 32, 1)}${grid(CHK, 29, 14, 1, C.eye)}</g>` : ""}
+      ${mascot(2, 25, 1, C.o, { eye: "right", cls: answered ? "" : "bob" })}${mascot(28, 25, 1, C.o, { eye: "left", cls: answered ? "hop" : "" })}</g>`),
+  stack: () => svg(40, `<g transform="translate(4,-4)">
+      ${mascot(6, 19, 1, C.lo, { eye: "right" })}${mascot(16, 19, 1, C.lo, { eye: "left" })}
+      ${mascot(11, 13, 1, C.hi, { flap: "LR", cls: "cheer" })}
+      <g class="beat">${grid(SPARK, 23, 7, 1, C.teal)}</g>
+      <g class="fall">${R(2, 4, 1, 1, C.sky)}</g><g class="fall d1">${R(9, 2, 1, 1, C.ind)}</g>
+      <g class="fall d2">${R(27, 3, 1, 1, C.teal)}</g><g class="fall d3">${R(31, 5, 1, 1, C.o)}</g></g>`),
+};
+const icon = (inner) => `<svg viewBox="0 0 10 7" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+const MINI = icon(mascot(0, 0, 1, C.o, { eyeCls: "" }));
+const LOGO = `<svg viewBox="0 0 32 32" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">${mascot(6, 19, 1, C.lo, { eye: "right", eyeCls: "" })}${mascot(16, 19, 1, C.lo, { eye: "left", eyeCls: "" })}${mascot(11, 13, 1, C.hi, { up: "LR", eyeCls: "" })}${grid(SPARK, 22, 7, 1, C.teal)}</svg>`;
+document.getElementById("logo").innerHTML = LOGO;
+document.getElementById("favicon").href = "data:image/svg+xml," + encodeURIComponent(LOGO);
+
+// ---------- dashboard ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ago = s => s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+const LABEL = { say: "shared", ask: "asked", reply: "answered", help: "needs you", goal: "goal", plan: "plan", claim: "claimed", contract: "interface", done: "done", shipped: "shipped" };
+const KCOLOR = { say: "say", ask: "ask", reply: "reply", help: "help", goal: "clay", plan: "plan", claim: "plan", contract: "say", done: "reply", shipped: "clay" };
+const STATUS = { open: ["open", "plan"], building: ["building", "ask"], done: ["done", "reply"] };
+const kvar = k => `var(--${KCOLOR[k] || "muted"})`;
+const av = `<div class="av">${MINI}</div>`;
+let shown = 0, sceneKey = "", wakeUntil = 0, lastCount = 0, lastMsgAt = 0;
+
 function openAsks(messages) {
   const pending = [];
   for (const m of messages) {
     if (m.kind === "ask") pending.push(m);
-    if (m.kind === "reply") {
-      const i = pending.findIndex(q => q.from === m.to && q.to === m.from);
-      if (i >= 0) pending.splice(i, 1);
-    }
+    if (m.kind === "reply") { const i = pending.findIndex(q => q.from === m.to && q.to === m.from); if (i >= 0) pending.splice(i, 1); }
   }
   return pending;
 }
 
+function pickScene(messages, agents, now) {
+  const last = messages[messages.length - 1];
+  const quiet = last ? now - last.ts : Infinity;
+  if (messages.some(m => m.kind === "shipped")) return ["stack", "Shipped. Every part is done 🎉"];
+  if (now < wakeUntil) return ["wake", `A message for ${esc(last.to === "all" ? "everyone" : last.to)} wakes them up`];
+  if (!Object.keys(agents).length && !messages.length) return ["crew", "Waiting for friends to join"];
+  if (quiet > 45) return ["sleep", "All quiet. Agents resting until someone pings them"];
+  if (last && (last.kind === "ask" || last.kind === "reply") && quiet < 12)
+    return last.kind === "ask" ? ["ask", `${esc(last.from)} asked ${esc(last.to)} a question`]
+                               : ["ask+", `${esc(last.to)} got an answer from ${esc(last.from)}, no human needed`];
+  if (last && ["goal", "plan", "claim"].includes(last.kind) && quiet < 20) return ["crew", "The crew is forming a plan"];
+  if (last && last.kind === "help") return ["ask", `${esc(last.from)} needs a human decision`];
+  return ["campfire", "Everyone's heads-down building"];
+}
+
+function setScene(key, caption) {
+  if (key !== sceneKey) {
+    sceneKey = key;
+    $("scene").innerHTML = key === "ask+" ? SCENES.ask(true) : key === "ask" ? SCENES.ask(false) : SCENES[key]();
+  }
+  $("caption").innerHTML = caption;
+}
+
 async function tick() {
   try {
-    const { messages, agents } = await (await fetch("/log")).json();
+    const { messages, agents, board } = await (await fetch("/log")).json();
     $("live").className = "live";
     const now = Date.now() / 1000;
 
+    // A new message after a quiet spell plays the wake-up scene first.
+    if (messages.length > lastCount && lastCount && now - lastMsgAt > 45) wakeUntil = now + 3;
+    if (messages.length !== lastCount) { lastCount = messages.length; lastMsgAt = messages.length ? messages[messages.length - 1].ts : 0; }
+    setScene(...pickScene(messages, agents, now));
+
+    // Goal + progress
+    if (board.goal.text) { $("goal").textContent = board.goal.text; $("goal").className = "goal"; $("goal-by").textContent = "set by " + board.goal.by; }
+    else { $("goal").textContent = 'No goal yet. Tell your Claude "our goal is …"'; $("goal").className = "goal empty"; $("goal-by").textContent = ""; }
+    const done = board.parts.filter(p => p.status === "done").length, total = board.parts.length;
+    $("bar").style.width = total ? `${(100 * done) / total}%` : "0";
+    $("bar-l").textContent = total ? `${done} of ${total} parts done` : "No parts yet";
+
     const open = openAsks(messages);
-    const asks = messages.filter(m => m.kind === "ask").length;
-    $("s-answered").textContent = asks - open.length;
+    $("s-answered").textContent = messages.filter(m => m.kind === "ask").length - open.length;
     $("s-open").textContent = open.length;
     $("s-human").textContent = messages.filter(m => m.kind === "help").length;
 
-    const names = [...new Set([...Object.keys(agents), ...messages.map(m => m.from)])];
+    // Parts board
+    $("parts").innerHTML = total ? board.parts.map(p => {
+      const [label, k] = STATUS[p.status] || [p.status, "plan"];
+      const st = p.owner && board.statuses[p.owner];
+      return `<div class="card part ${p.status}"><div class="top"><span class="id">${esc(p.id)}/</span>
+          <span class="pill" style="--k:var(--${k})">${label}</span></div>
+        <div class="desc">${esc(p.desc)}</div>
+        ${p.owner ? `<div class="owner">${av}<div><b>${esc(p.owner)}</b>${st ? `<div class="st">${esc(st)}</div>` : ""}</div></div>` : `<div class="desc">Unclaimed: up for grabs</div>`}
+        ${p.contract ? `<div class="iface">${esc(p.contract)}</div>` : ""}</div>`;
+    }).join("") : `<div class="empty" style="grid-column: 1 / -1">The plan appears here once the goal is split into parts.</div>`;
+
+    // Friends
+    const names = [...new Set([...Object.keys(agents), ...messages.map(m => m.from).filter(n => n !== "hub")])];
     $("friends").innerHTML = names.length ? names.map(n => {
       const t = agents[n], on = t && now - t < 90;
-      return `<div class="friend ${on ? "on" : ""}">${av(n)}<div><div class="name">${esc(n)}</div>
-        <div class="state">${on ? "online" : t ? "away · " + ago(now - t) : "away"}</div></div></div>`;
-    }).join("") : `<div class="none">No one here yet</div>`;
-    $("open").innerHTML = open.length
-      ? open.map(q => `<div class="q"><b>${esc(q.from)} → ${esc(q.to)}</b> ${esc(q.text)}</div>`).join("")
-      : `<div class="none">Nothing waiting 🎉</div>`;
+      const part = board.parts.find(p => p.owner === n);
+      const st = board.statuses[n] || (part ? `working on ${part.id}/` : "");
+      return `<div class="friend ${on ? "on" : ""}">${av}<div style="flex:1;min-width:0"><div class="name">${esc(n)}</div>
+        <div class="state">${esc(st || (on ? "online" : t ? "away · " + ago(now - t) : "away"))}</div></div><span class="dot"></span></div>`;
+    }).join("") : `<div class="none">No one here yet. Run <code>bin/agent yourname</code></div>`;
+    $("open").innerHTML = open.length ? open.map(q => `<div class="q"><b>${esc(q.from)} → ${esc(q.to)}</b> ${esc(q.text)}</div>`).join("") : `<div class="none">Nothing waiting</div>`;
 
-    if (messages.length < shown) { shown = 0; $("feed").innerHTML = `<div class="empty">Fresh start. Quiet so far.</div>`; }
+    // Conversation (newest at the bottom)
+    if (messages.length < shown) { shown = 0; sceneKey = ""; wakeUntil = 0; $("feed").innerHTML = `<div class="empty">Fresh start. Quiet so far.</div>`; }
     if (messages.length && !shown) $("feed").innerHTML = "";
     for (const m of messages.slice(shown)) {
       const el = document.createElement("article");
-      el.className = "card msg " + m.kind;
-      el.innerHTML = `${av(m.from)}<div class="body"><div class="top"><b>${esc(m.from)}</b><span>→</span>
-        <b>${esc(m.to === "all" ? "everyone" : m.to)}</b>
-        <span class="pill" style="--k:var(--${m.kind}, var(--muted))">${esc(LABEL[m.kind] || m.kind)}</span>
-        <span class="time">${new Date(m.ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"})}</span></div>
+      el.className = "card msg k-" + m.kind;
+      el.innerHTML = `${av}<div class="body"><div class="meta"><b>${esc(m.from)}</b><span>→</span><b>${esc(m.to === "all" ? "everyone" : m.to)}</b>
+        <span class="pill" style="--k:${kvar(m.kind)}">${esc(LABEL[m.kind] || m.kind)}</span>
+        <span class="time">${new Date(m.ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span></div>
         <div class="text">${esc(m.text)}</div></div>`;
       $("feed").appendChild(el);
-      el.scrollIntoView({behavior: "smooth", block: "end"});
+      if (shown) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
     shown = messages.length;
   } catch (e) { $("live").className = "live off"; }
