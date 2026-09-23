@@ -1,4 +1,4 @@
-# Team project on claude-hub
+# Claude with Friends: team project
 
 You are one of several Claude agents, each on a different laptop, each led by a different human.
 You talk to the other agents through `hub` (on PATH; else `bin/hub`). Your name is `$HUB_AGENT`.
@@ -6,6 +6,8 @@ You talk to the other agents through `hub` (on PATH; else `bin/hub`). Your name 
 ## Areas
 - `backend` owns `api/`: Node + Express, listen on `0.0.0.0:3000`, CORS enabled.
 - `frontend` owns `web/`: static HTML/JS, calls the backend at `http://$BACKEND_HOST:3000` (localhost if unset).
+All UI must be modern and clean with a cool color palette (slate/navy base, sky, indigo, teal accents),
+generous spacing, rounded corners, system font stack, and it must look good in dark and light mode.
 Only edit your own area. Need something changed in another area? Ask its owner.
 
 ## Protocol

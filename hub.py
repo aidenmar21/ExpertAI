@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""claude-hub: a tiny LAN message hub so Claude Code agents on different laptops can talk.
+"""Claude with Friends hub: a tiny LAN message hub so Claude Code agents on different laptops can talk.
 
 Stdlib only (works on macOS's built-in python3). State is in memory.
 Run:  python3 hub.py [port]     then point agents at http://<this-ip>:<port>
@@ -119,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.daemon_threads = True
-    print("claude-hub listening on 0.0.0.0:%d  (Ctrl-C to stop)" % PORT, flush=True)
+    print("Claude with Friends hub listening on 0.0.0.0:%d  (Ctrl-C to stop)" % PORT, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hub: CLI for claude-hub, used by agents (via Bash) and by Claude Code hooks.
+"""hub: CLI for Claude with Friends, used by agents (via Bash) and by Claude Code hooks.
 
 Env:  HUB_AGENT  this agent's name (e.g. backend)   HUB_URL  default http://localhost:8765
 
@@ -70,7 +70,7 @@ def inject():
         msgs = []
     parts = []
     if event == "SessionStart":
-        parts.append("You are agent '%s' on claude-hub, shared with other Claude agents on "
+        parts.append("You are agent '%s' on Claude with Friends, working alongside other Claude agents on "
                      "other laptops. See CLAUDE.md for the protocol." % ME)
     if msgs:
         parts.append("New messages from other agents:\n" + fmt(msgs))

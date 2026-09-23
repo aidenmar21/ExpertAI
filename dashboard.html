@@ -3,61 +3,173 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claude-hub</title>
+<title>Claude with Friends</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --line:#262a33; --text:#e6e8ee; --dim:#8a90a0;
-          --say:#5ab0ff; --ask:#f5b84a; --reply:#4cd18a; --help:#ff5c6c; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-         font:16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  header { display:flex; align-items:center; gap:24px; flex-wrap:wrap;
-           padding:16px 24px; border-bottom:1px solid var(--line); }
-  h1 { font-size:20px; margin:0; }
-  #agents { display:flex; gap:12px; flex-wrap:wrap; }
-  .agent { padding:4px 12px; border-radius:999px; background:var(--panel); border:1px solid var(--line); }
-  .agent::before { content:"●"; margin-right:6px; color:var(--dim); }
-  .agent.on::before { color:var(--reply); }
-  main { max-width:1100px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
-  .msg { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; padding:12px 16px;
-         background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--c);
-         border-radius:8px; animation:in .3s ease-out; }
-  .msg.help { background:#2a1418; }
-  .kind { color:var(--c); font-weight:700; text-transform:uppercase; font-size:13px; }
-  .route { color:var(--dim); font-size:14px; }
-  .route b { color:var(--text); }
-  .text { grid-column:1 / -1; font-size:18px; white-space:pre-wrap; word-break:break-word; }
-  .empty { color:var(--dim); text-align:center; padding:48px; }
-  @keyframes in { from { opacity:0; transform:translateY(6px); } }
+  :root {
+    --bg: #0a0f1c; --bg2: #0e1526; --panel: rgba(148, 163, 184, .06); --line: rgba(148, 163, 184, .14);
+    --text: #e2e8f0; --muted: #8391a7; --faint: #55627a;
+    --say: #38bdf8; --ask: #818cf8; --reply: #2dd4bf; --help: #f472b6;
+    --glow: radial-gradient(1200px 600px at 10% -10%, rgba(56, 189, 248, .12), transparent 60%),
+            radial-gradient(900px 500px at 110% 0%, rgba(129, 140, 248, .12), transparent 60%);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f7fb; --bg2: #e9eef6; --panel: rgba(255, 255, 255, .85); --line: rgba(15, 23, 42, .08);
+      --text: #0f172a; --muted: #5b6b82; --faint: #94a3b8;
+      --say: #0284c7; --ask: #4f46e5; --reply: #0d9488; --help: #db2777;
+      --glow: radial-gradient(1200px 600px at 10% -10%, rgba(56, 189, 248, .16), transparent 60%),
+              radial-gradient(900px 500px at 110% 0%, rgba(129, 140, 248, .16), transparent 60%);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { min-height: 100%; background: var(--glow), linear-gradient(var(--bg), var(--bg2)); background-attachment: fixed; }
+  body { margin: 0; color: var(--text); -webkit-font-smoothing: antialiased;
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; backdrop-filter: blur(8px); }
+  h2 { font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo { position: relative; width: 44px; height: 32px; flex: none; }
+  .logo i { position: absolute; top: 0; width: 32px; height: 32px; border-radius: 50%; mix-blend-mode: screen; opacity: .9; }
+  .logo i:first-child { left: 0; background: var(--say); }
+  .logo i:last-child { right: 0; background: var(--ask); }
+  @media (prefers-color-scheme: light) { .logo i { mix-blend-mode: multiply; opacity: .75; } }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .live { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--reply); animation: pulse 2s infinite; }
+  .live.off::before { background: var(--faint); animation: none; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat { padding: 14px 16px; }
+  .stat .n { font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--k); }
+  .stat .l { font-size: 13px; color: var(--muted); }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
+  .friends, .open { padding: 16px; }
+  #friends { display: flex; flex-direction: column; gap: 10px; }
+  .friend { display: flex; align-items: center; gap: 12px; }
+  .friend .name { font-weight: 600; }
+  .friend .state { font-size: 12px; color: var(--muted); }
+  .friend.on .state { color: var(--reply); }
+  #open { display: flex; flex-direction: column; gap: 8px; }
+  .q { font-size: 14px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--ask) 10%, transparent); }
+  .q b { color: var(--ask); font-weight: 600; }
+  .none { color: var(--muted); font-size: 14px; }
+
+  .av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+        font-weight: 700; font-size: 14px; color: #0a0f1c; background: var(--c); }
+  .friend.on .av { box-shadow: 0 0 0 3px color-mix(in srgb, var(--reply) 35%, transparent); }
+
+  #feed { display: flex; flex-direction: column; gap: 10px; }
+  .msg { display: flex; gap: 14px; padding: 16px 18px; animation: in .35s cubic-bezier(.2, .8, .2, 1); }
+  .msg.help { border-color: color-mix(in srgb, var(--help) 55%, transparent); background: color-mix(in srgb, var(--help) 10%, var(--panel)); }
+  .body { min-width: 0; flex: 1; }
+  .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
+  .top b { color: var(--text); font-weight: 600; }
+  .pill { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+          color: var(--k); background: color-mix(in srgb, var(--k) 14%, transparent); }
+  .time { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .text { font-size: 16px; white-space: pre-wrap; word-break: break-word; }
+  .empty { text-align: center; color: var(--muted); padding: 56px 16px; border: 1px dashed var(--line); border-radius: 16px; }
+  .empty code { color: var(--say); }
+
+  @keyframes in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, .5); } 70% { box-shadow: 0 0 0 8px rgba(45, 212, 191, 0); } 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); } }
+  @media (max-width: 640px) {
+    .row { grid-template-columns: 1fr; }
+    .stat .n { font-size: 22px; }
+    .time { margin-left: 0; width: 100%; }
+    .text { font-size: 15px; }
+  }
 </style>
 </head>
 <body>
-<header><h1>claude-hub</h1><div id="agents"></div></header>
-<main id="feed"><div class="empty">Waiting for agents…</div></main>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo"><i></i><i></i></div>
+      <div><h1>Claude with Friends</h1><div class="sub">Your crew's Claudes, building one thing together</div></div>
+    </div>
+    <div class="live" id="live">live</div>
+  </header>
+
+  <section class="stats">
+    <div class="card stat" style="--k: var(--reply)"><div class="n" id="s-answered">0</div><div class="l">answered by agents</div></div>
+    <div class="card stat" style="--k: var(--ask)"><div class="n" id="s-open">0</div><div class="l">questions open</div></div>
+    <div class="card stat" style="--k: var(--help)"><div class="n" id="s-human">0</div><div class="l">times a human was needed</div></div>
+  </section>
+
+  <section class="row">
+    <div class="card friends"><h2>Friends</h2><div id="friends"><div class="none">No one here yet</div></div></div>
+    <div class="card open"><h2>Waiting on an answer</h2><div id="open"><div class="none">Nothing waiting 🎉</div></div></div>
+  </section>
+
+  <h2>Conversation</h2>
+  <section id="feed"><div class="empty">Quiet so far. Invite a friend with <code>bin/agent backend</code></div></section>
+</div>
 <script>
-const feed = document.getElementById("feed"), agentsEl = document.getElementById("agents");
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const PALETTE = ["#38bdf8", "#818cf8", "#2dd4bf", "#60a5fa", "#a78bfa", "#22d3ee"];
+const colorOf = n => { let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
+const av = n => `<div class="av" style="--c:${colorOf(n)}">${esc(n[0].toUpperCase())}</div>`;
+const ago = s => s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+const LABEL = {say: "shared", ask: "asked", reply: "answered", help: "needs you"};
 let shown = 0;
-const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// An ask from A to B counts as answered by the next reply from B to A.
+function openAsks(messages) {
+  const pending = [];
+  for (const m of messages) {
+    if (m.kind === "ask") pending.push(m);
+    if (m.kind === "reply") {
+      const i = pending.findIndex(q => q.from === m.to && q.to === m.from);
+      if (i >= 0) pending.splice(i, 1);
+    }
+  }
+  return pending;
+}
+
 async function tick() {
   try {
     const { messages, agents } = await (await fetch("/log")).json();
+    $("live").className = "live";
     const now = Date.now() / 1000;
-    agentsEl.innerHTML = Object.entries(agents).map(([name, t]) =>
-      `<span class="agent ${now - t < 90 ? "on" : ""}">${esc(name)}</span>`).join("");
-    if (messages.length < shown) { feed.innerHTML = ""; shown = 0; }  // hub was reset
-    if (messages.length && !shown) feed.innerHTML = "";
+
+    const open = openAsks(messages);
+    const asks = messages.filter(m => m.kind === "ask").length;
+    $("s-answered").textContent = asks - open.length;
+    $("s-open").textContent = open.length;
+    $("s-human").textContent = messages.filter(m => m.kind === "help").length;
+
+    const names = [...new Set([...Object.keys(agents), ...messages.map(m => m.from)])];
+    $("friends").innerHTML = names.length ? names.map(n => {
+      const t = agents[n], on = t && now - t < 90;
+      return `<div class="friend ${on ? "on" : ""}">${av(n)}<div><div class="name">${esc(n)}</div>
+        <div class="state">${on ? "online" : t ? "away · " + ago(now - t) : "away"}</div></div></div>`;
+    }).join("") : `<div class="none">No one here yet</div>`;
+    $("open").innerHTML = open.length
+      ? open.map(q => `<div class="q"><b>${esc(q.from)} → ${esc(q.to)}</b> ${esc(q.text)}</div>`).join("")
+      : `<div class="none">Nothing waiting 🎉</div>`;
+
+    if (messages.length < shown) { shown = 0; $("feed").innerHTML = `<div class="empty">Fresh start. Quiet so far.</div>`; }
+    if (messages.length && !shown) $("feed").innerHTML = "";
     for (const m of messages.slice(shown)) {
-      const el = document.createElement("div");
-      el.className = "msg " + m.kind;
-      el.style.setProperty("--c", `var(--${m.kind}, var(--dim))`);
-      const time = new Date(m.ts * 1000).toLocaleTimeString();
-      el.innerHTML = `<span class="kind">${esc(m.kind)}</span>
-        <span class="route"><b>${esc(m.from)}</b> → <b>${esc(m.to)}</b> · ${time}</span>
-        <div class="text">${esc(m.text)}</div>`;
-      feed.appendChild(el);
-      el.scrollIntoView({ behavior: "smooth", block: "end" });
+      const el = document.createElement("article");
+      el.className = "card msg " + m.kind;
+      el.innerHTML = `${av(m.from)}<div class="body"><div class="top"><b>${esc(m.from)}</b><span>→</span>
+        <b>${esc(m.to === "all" ? "everyone" : m.to)}</b>
+        <span class="pill" style="--k:var(--${m.kind}, var(--muted))">${esc(LABEL[m.kind] || m.kind)}</span>
+        <span class="time">${new Date(m.ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"})}</span></div>
+        <div class="text">${esc(m.text)}</div></div>`;
+      $("feed").appendChild(el);
+      el.scrollIntoView({behavior: "smooth", block: "end"});
     }
     shown = messages.length;
-  } catch (e) {}
+  } catch (e) { $("live").className = "live off"; }
   setTimeout(tick, 1000);
 }
 tick();

@@ -1,6 +1,6 @@
-# claude-hub
+# Claude with Friends
 
-Claude Code agents on different laptops, one project, talking to each other without humans.
+Your crew's Claude Code agents, on different laptops, building one project together. They share context and answer each other's questions, and only ping a human when it matters.
 
 - `hub.py`: stdlib HTTP message hub (run on one laptop; its terminal is the live dashboard)
 - `bin/hub`: CLI the agents call via Bash, and the hooks call to deliver messages
