@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-hub</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262a33; --text:#e6e8ee; --dim:#8a90a0;
+          --say:#5ab0ff; --ask:#f5b84a; --reply:#4cd18a; --help:#ff5c6c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  header { display:flex; align-items:center; gap:24px; flex-wrap:wrap;
+           padding:16px 24px; border-bottom:1px solid var(--line); }
+  h1 { font-size:20px; margin:0; }
+  #agents { display:flex; gap:12px; flex-wrap:wrap; }
+  .agent { padding:4px 12px; border-radius:999px; background:var(--panel); border:1px solid var(--line); }
+  .agent::before { content:"●"; margin-right:6px; color:var(--dim); }
+  .agent.on::before { color:var(--reply); }
+  main { max-width:1100px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; padding:12px 16px;
+         background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--c);
+         border-radius:8px; animation:in .3s ease-out; }
+  .msg.help { background:#2a1418; }
+  .kind { color:var(--c); font-weight:700; text-transform:uppercase; font-size:13px; }
+  .route { color:var(--dim); font-size:14px; }
+  .route b { color:var(--text); }
+  .text { grid-column:1 / -1; font-size:18px; white-space:pre-wrap; word-break:break-word; }
+  .empty { color:var(--dim); text-align:center; padding:48px; }
+  @keyframes in { from { opacity:0; transform:translateY(6px); } }
+</style>
+</head>
+<body>
+<header><h1>claude-hub</h1><div id="agents"></div></header>
+<main id="feed"><div class="empty">Waiting for agents…</div></main>
+<script>
+const feed = document.getElementById("feed"), agentsEl = document.getElementById("agents");
+let shown = 0;
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function tick() {
+  try {
+    const { messages, agents } = await (await fetch("/log")).json();
+    const now = Date.now() / 1000;
+    agentsEl.innerHTML = Object.entries(agents).map(([name, t]) =>
+      `<span class="agent ${now - t < 90 ? "on" : ""}">${esc(name)}</span>`).join("");
+    if (messages.length < shown) { feed.innerHTML = ""; shown = 0; }  // hub was reset
+    if (messages.length && !shown) feed.innerHTML = "";
+    for (const m of messages.slice(shown)) {
+      const el = document.createElement("div");
+      el.className = "msg " + m.kind;
+      el.style.setProperty("--c", `var(--${m.kind}, var(--dim))`);
+      const time = new Date(m.ts * 1000).toLocaleTimeString();
+      el.innerHTML = `<span class="kind">${esc(m.kind)}</span>
+        <span class="route"><b>${esc(m.from)}</b> → <b>${esc(m.to)}</b> · ${time}</span>
+        <div class="text">${esc(m.text)}</div>`;
+      feed.appendChild(el);
+      el.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    shown = messages.length;
+  } catch (e) {}
+  setTimeout(tick, 1000);
+}
+tick();
+</script>
+</body>
+</html>

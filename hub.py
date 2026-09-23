@@ -9,9 +9,11 @@ Routes
   GET  /feed?agent=X                         unread messages for X (marks them read)
   GET  /wait?agent=X&timeout=S               like /feed but blocks until something arrives
   GET  /log                                  every message + who's online (for dashboards)
+  GET  /                                     browser dashboard (dashboard.html)
   POST /reset                                wipe everything (rerun the demo)
 """
 import json
+import os
 import sys
 import threading
 import time
@@ -79,6 +81,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/log":
             with cond:
                 return self.send_json({"messages": msgs, "agents": last_seen})
+        if url.path == "/":
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         self.send_json({"error": "not found"}, 404)
 
     def do_POST(self):
