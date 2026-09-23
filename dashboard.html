@@ -91,6 +91,10 @@
   .text { font-size: 15px; white-space: pre-wrap; word-break: break-word; }
   .empty { text-align: center; color: var(--muted); padding: 40px 16px; border: 1px dashed var(--line); border-radius: 16px; }
   code { font-family: var(--mono); color: var(--clay); }
+  .takeaway { display: flex; align-items: center; gap: 20px; padding: 18px 22px; margin-top: 24px; }
+  .takeaway img { width: 112px; height: 112px; background: #fff; border-radius: 10px; padding: 6px; flex: none; }
+  .takeaway .t { font: 400 20px/1.3 var(--serif); }
+  .takeaway .u { font: 13px var(--mono); color: var(--clay); margin-top: 6px; word-break: break-all; }
 
   /* ---- pixel scene animations ---- */
   .scene g { transform-box: fill-box; }
@@ -174,6 +178,13 @@
 
   <h2>Conversation</h2>
   <section id="feed"><div class="empty">Quiet so far.</div></section>
+
+  <section class="card takeaway">
+    <img src="/assets/qr.svg" alt="QR code for the GitHub repo">
+    <div><div class="t">Take it home. Build something with your friends.</div>
+      <div class="u">github.com/epaynter/claude-with-friends</div>
+      <div class="goal-by">Open source, MIT. One Python file, no dependencies.</div></div>
+  </section>
 </div>
 <script>
 // ---------- pixel mascot kit (Claude Code character) ----------

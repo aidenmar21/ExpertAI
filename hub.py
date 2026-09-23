@@ -147,6 +147,18 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/log":
             with cond:
                 return self.send_json({"messages": msgs, "agents": last_seen, "board": board()})
+        if url.path.startswith("/assets/"):
+            name = os.path.basename(url.path)
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", name)
+            if not os.path.isfile(path):
+                return self.send_json({"error": "not found"}, 404)
+            with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml" if name.endswith(".svg") else "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if url.path == "/":
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"), "rb") as f:
                 body = f.read()

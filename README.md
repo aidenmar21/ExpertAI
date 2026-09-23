@@ -1,25 +1,50 @@
 # Claude with Friends
 
-Your crew's Claude Code agents, on different laptops, building one project together. They share context and answer each other's questions, and only ping a human when it matters.
+Your crew's Claude Code agents, on different laptops, building one project together.
+They share a goal, split it into parts, agree on interfaces, and answer each other's questions.
+They only ping a human when a real decision is needed.
 
-- `hub.py`: stdlib HTTP message hub (run on one laptop; its terminal is the live dashboard)
-- `bin/hub`: CLI the agents call via Bash, and the hooks call to deliver messages
-- `.claude/settings.json`: hooks. New messages get injected after every tool call, and an idle agent is
-  woken (Stop hook + `asyncRewake`) the moment someone messages it
-- `CLAUDE.md`: the protocol the agents follow
+- **One shared goal, split into parts.** Each friend's agent claims a part (a top-level folder), publishes its interface first, and builds against friends' interfaces without waiting.
+- **Agents talk directly.** `hub ask bob "…"` from one laptop shows up in bob's session on the next tool call.
+- **Idle agents wake up.** A Stop hook with `asyncRewake` long-polls the hub, so a message wakes a Claude that's finished its turn.
+- **Live dashboard** at `http://<hub-ip>:8765` shows the goal, the parts board, open questions, the conversation, and pixel Claudes animating what's happening.
 
-## Run it (one machine, three terminals)
+No dependencies: `hub.py` is one stdlib Python file, `bin/hub` is the CLI the agents and hooks share.
+
+## Quick start
+
+On the laptop that hosts the hub:
 ```bash
-python3 hub.py                      # T1: hub + dashboard
-bin/agent backend                   # T2
-bin/agent frontend                  # T3
+git clone https://github.com/epaynter/claude-with-friends && cd claude-with-friends
+python3 hub.py                      # hub + dashboard on :8765 (allow the macOS firewall prompt)
+ipconfig getifaddr en0              # your LAN IP, for friends
+bin/agent alice                     # in another terminal: Claude, joined to the hub
 ```
 
-## Two machines
+On each friend's laptop (same wifi):
 ```bash
-ipconfig getifaddr en0              # on laptop A (runs the hub): note the IP, allow the firewall prompt
-curl -m 3 http://A-IP:8765/log      # on laptop B: must print JSON, else switch to a phone hotspot
-HUB_URL=http://A-IP:8765 BACKEND_HOST=A-IP bin/agent frontend   # on laptop B
+git clone https://github.com/epaynter/claude-with-friends && cd claude-with-friends
+curl -m 3 http://HUB-IP:8765/log    # must print JSON; venue wifi often blocks this, so use a phone hotspot
+HUB_URL=http://HUB-IP:8765 bin/agent bob
 ```
 
-`bin/hub reset` wipes the hub between demo runs.
+Then:
+1. One friend tells their Claude: *"Our goal is … Done = …"*. It sets the goal, splits it into parts, and claims one.
+2. Everyone else types **go** (or *"go, I want web"*). Their agents claim parts and start building.
+3. Watch the dashboard. `bin/hub reset` starts over.
+
+Run Claude in auto mode (Shift-Tab) so agents aren't stalled by permission prompts.
+
+## How it works
+
+| Piece | Role |
+|---|---|
+| `hub.py` | HTTP hub: messages, per-agent unread cursors, long-poll `/wait`, the board (goal, parts, interfaces, status) |
+| `bin/hub` | `goal`, `part`, `claim`, `contract`, `status`, `done`, `say`, `ask`, `reply`, `help`, `board`, `log` |
+| `.claude/settings.json` | Hooks: `SessionStart`/`UserPromptSubmit`/`PostToolUse` inject new messages and the board; `Stop` + `asyncRewake` wakes idle agents |
+| `CLAUDE.md` | The team protocol agents follow |
+| `dashboard.html` | The live dashboard |
+
+**Security:** hub messages are injected into every agent's context. Only run it on a network you trust.
+
+MIT licensed.
