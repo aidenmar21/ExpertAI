@@ -61,9 +61,13 @@ State: `debrief` (`idle -> asking -> teach_back -> confirmed`), `debriefPlan`, `
 
 ## Dashboard setup
 
-Both agents are configured from `shared/prompts/interviewer.md` and `shared/prompts/tutor.md` (strip the first `#` line). Optional client tools (blocking off) let the agent change state itself:
-- `set_off_record` (boolean `on`), `confirm_teach_back`
-- tutor: `replay_expert_moment` -> `onReplayRequested`, `flag_new_case` (string `summary`) -> `onNewCase`
+Both agents ("Understudy interviewer", "Understudy tutor") are configured through the API from `shared/prompts/interviewer.md` and `shared/prompts/tutor.md` (minus the first `#` line). After editing a prompt, push it again.
+
+Client tools (non-blocking), handled in the hook:
+- interviewer: `set_off_record` (boolean `on`) -> `offRecord`, `onOffRecordChange`; `confirm_teach_back` -> `debrief: "confirmed"`, `onTeachBackConfirmed`
+- tutor: `replay_expert_moment` -> `onReplayRequested(activeGuardrail)`; `flag_new_case` (string `summary`) -> `newCases`, `onNewCase`
+
+The hook also catches "off the record" and "yes" from the transcript, so it still works if a tool call is missed.
 
 ## Dev
 
