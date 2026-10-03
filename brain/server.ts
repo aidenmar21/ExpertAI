@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type {
   JobProfile, Rule, RuleType, ScreenEvent, TranscriptLine, WorkMap, WorkMapStep,
 } from "@understudy/shared";
-import { emptyWorkMap } from "./index";
+import { canonicalEvents, emptyWorkMap } from "./index";
 import { captureDecisions, recordsToGaps, type DecisionRecord } from "./records";
 
 export interface BuildWorkMapInput {
@@ -209,7 +209,7 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   const confirmedIds = new Set(prevRecords.filter((r) => r.status !== "unconfirmed").map((r) => r.id));
 
   const records = captureDecisions({
-    events: input.events, transcript: input.transcript,
+    events: job ? canonicalEvents(job, input.events) : input.events, transcript: input.transcript,
     piiNames: piiValues(job), escalateTo: job?.job.escalate_to,
   }).map((r) => {
     const prev = prevRecords.find((p) => p.id === r.id);

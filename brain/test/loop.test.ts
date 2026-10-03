@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import type { Rule, ScreenEvent, TranscriptLine } from "@understudy/shared";
 import {
-  captureDecisions, pickFromRecords, checkAction, nextQuestionKind, questionFor, workMapToAgentText, redact,
+  captureDecisions, pickFromRecords, checkAction, canonicalField, score, nextQuestionKind, questionFor, workMapToAgentText, redact,
 } from "../index";
 import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, groundRules, screenValues, type LlmRule } from "../server";
 
@@ -75,6 +75,14 @@ const transcript: TranscriptLine[] = [
   const job = loadJob("returns-desk")!;
   assert.ok(job, "job loads");
   assert.ok(!JSON.stringify(agentSafeJob(job)).includes("hidden_rules"));
+  assert.equal(canonicalField(job, "refund_to"), "refund_method");
+  assert.equal(canonicalField(job, "Purchased"), "purchase_date");
+  assert.equal(canonicalField(job, "status"), "status");
+  const sb = score({ job, map: { job_id: "returns-desk", expert: "A", steps: [], rules: [], open_gaps: [] },
+    groundTruth: [{ t: 1000, field: "refund_method", from: "Cash", to: "Original card" }, { t: 5000, field: "purchase_date", from: null, to: "2026-09-30" }],
+    events: [ev("v1", 2500, "R-88104", "refund_to", "Cash", "Original card"), ev("v2", 6000, "R-88104", "purchased", null, "2026-09-30")] });
+  assert.equal(sb.vision_accuracy, 1, "label-named vision events match key-named ground truth");
+  assert.equal(sb.rules_total, 6);
   const sv = screenValues(job, "R-88102")!;
   assert.equal(sv.item, "Intro to Biology textbook + access code");
   assert.ok(!("customer" in sv) && !("card" in sv), "PII fields stripped from LLM context");

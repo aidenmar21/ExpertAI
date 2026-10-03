@@ -8,6 +8,7 @@ Owner: aiden. Turns what the expert did and said into decision records, a Work M
 - `pickFromRecords(events, transcript, {now?, maxAgeMs?=60000, followUps?=true}): QuestionPick | null`: for engine.pickQuestion. It follows up on the latest explained decision first, then asks why about the newest unexplained one. It never repeats a question or re-asks after a vague answer, and it stays silent when off the record or when nothing is recent.
 - `questionFor(record, kind)`, `nextQuestionKind(record)`: grounded questions in the order why, then what would change it, then when to stop. Never repeats a kind.
 - `recordsToGaps`, `confirmRecords`, `correctRecord`, `workMapToAgentText(map)` (agent context text, never includes hidden_rules).
+- `canonicalField(job, name)`, `canonicalEvents(job, events)`: map vision label names (refund_to) to job keys (refund_method). `score` and `buildWorkMap` apply this automatically.
 - `redact(text, names?)`, `redactRecord(rec, job)`, `score(...)`, `evalCondition`, `onRecordOnly`, `emptyWorkMap`.
 
 ## `@understudy/brain/server` (API routes only; reads ANTHROPIC_API_KEY, LLM_MODEL)

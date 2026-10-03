@@ -95,6 +95,21 @@ export function redactRecord(rec: Rec, job: JobProfile): Rec {
   return Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, pii.has(k) && v != null ? "[REDACTED]" : v]));
 }
 
+// ---------- Field names ----------
+const snake = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+// Vision may name a field by its visible label ("Refund to" -> refund_to). Map it back to the job key (refund_method).
+export function canonicalField(job: JobProfile, name: string | undefined): string | undefined {
+  if (!name) return name;
+  const n = snake(name);
+  const f = job.screen.fields.find((x) => x.key === name || snake(x.key) === n || snake(x.label) === n);
+  return f ? f.key : name;
+}
+
+export function canonicalEvents(job: JobProfile, events: ScreenEvent[]): ScreenEvent[] {
+  return events.map((e) => (e.field ? { ...e, field: canonicalField(job, e.field) } : e));
+}
+
 // ---------- Scoreboard ----------
 export interface GroundTruthChange { t: number; field: string; from: Value; to: Value; record?: string; }
 
@@ -116,7 +131,7 @@ export function score(s: ScoreInput): Scoreboard {
     : Math.min(hidden.length, s.map.rules.filter((r) => r.confirmed).length);
 
   const gt = s.groundTruth ?? [];
-  const evs = (s.events ?? []).filter((e) => e.field);
+  const evs = canonicalEvents(s.job, s.events ?? []).filter((e) => e.field);
   const hit = gt.filter((g) =>
     evs.some((e) => same(e.field, g.field) && same(e.to, g.to) && Math.abs(e.t - g.t) < 10_000)).length;
 
