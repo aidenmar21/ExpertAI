@@ -1,5 +1,5 @@
 {
-  "_readme": "Job profile for the bookstore returns desk. All data is fake. hidden_rules are PLACEHOLDERS: replace them with Aarav's real rules from the rule-mining questions. hidden_rules is the answer key and must never be sent to the agent.",
+  "_readme": "Job profile for the bookstore returns desk. All data is fake. hidden_rules (with probes) and new_hire_test_cases[].expected are the answer key: scoring only, never sent to the agent or the browser. R1-R4 are Aarav's demo rules (R5/R6 dropped by Aarav).",
   "job": {
     "id": "returns-desk",
     "name": "Returns desk",
@@ -228,7 +228,15 @@
       "purchase_date": "2026-09-25",
       "condition": "New",
       "paid_with": "card",
-      "trap": "$142 refund: needs a manager."
+      "trap": "$142 refund: needs a manager.",
+      "expected": {
+        "wrong": {
+          "action": "refund"
+        },
+        "right": {
+          "action": "call_manager"
+        }
+      }
     },
     {
       "case": "N2",
@@ -238,7 +246,13 @@
       "purchase_date": "2026-09-29",
       "condition": "New",
       "paid_with": "card",
-      "trap": "Third return this month by the same customer: call a manager."
+      "trap": "None (R5 dropped). Routine $54 refund: tutor must stay silent.",
+      "expected": {
+        "wrong": null,
+        "right": {
+          "action": "refund"
+        }
+      }
     },
     {
       "case": "N3",
@@ -249,7 +263,15 @@
       "condition": "New",
       "paid_with": "unknown",
       "customer_asks_for": "cash",
-      "trap": "No receipt and wants cash: store credit only (and over $100: manager)."
+      "trap": "No receipt and wants cash: store credit only (and over $100: manager).",
+      "expected": {
+        "wrong": {
+          "action": "refund"
+        },
+        "right": {
+          "action": "call_manager"
+        }
+      }
     },
     {
       "case": "N4",
@@ -259,7 +281,15 @@
       "purchase_date": "2026-09-27",
       "condition": "Defective",
       "paid_with": "card",
-      "trap": "Defective item: offer an exchange first. Good moment for the stuck trigger."
+      "trap": "$119 refund: over $100 needs the shift manager (R3). R6 dropped.",
+      "expected": {
+        "wrong": {
+          "action": "refund"
+        },
+        "right": {
+          "action": "call_manager"
+        }
+      }
     },
     {
       "case": "N5",
@@ -269,39 +299,65 @@
       "purchase_date": "2026-10-01",
       "condition": "New",
       "paid_with": "card",
-      "trap": "None. Routine refund: tutor must stay silent."
+      "trap": "None. Routine refund: tutor must stay silent.",
+      "expected": {
+        "wrong": null,
+        "right": {
+          "action": "refund"
+        }
+      }
     }
   ],
   "hidden_rules": [
     {
       "id": "R1",
-      "rule": "PLACEHOLDER: No receipt means store credit only, at the lowest recent price.",
-      "type": "guardrail"
+      "rule": "Textbook with an opened access code is never refundable.",
+      "type": "exception",
+      "probes": [
+        {
+          "from": "X2",
+          "action": "refund"
+        }
+      ]
     },
     {
       "id": "R2",
-      "rule": "PLACEHOLDER: Textbook with an opened access code is not refundable.",
-      "type": "exception"
+      "rule": "No receipt means store credit only.",
+      "type": "guardrail",
+      "probes": [
+        {
+          "from": "N3",
+          "set": {
+            "price": 40
+          },
+          "action": "refund"
+        }
+      ]
     },
     {
       "id": "R3",
-      "rule": "PLACEHOLDER: Refunds over $100 need a manager override.",
-      "type": "limit"
+      "rule": "Refunds over $100 need the shift manager.",
+      "type": "limit",
+      "probes": [
+        {
+          "from": "N1",
+          "action": "refund"
+        }
+      ]
     },
     {
       "id": "R4",
-      "rule": "PLACEHOLDER: Card payments refund to the card, never cash.",
-      "type": "guardrail"
-    },
-    {
-      "id": "R5",
-      "rule": "PLACEHOLDER: Third return by the same customer in 30 days: call a manager.",
-      "type": "judgment"
-    },
-    {
-      "id": "R6",
-      "rule": "PLACEHOLDER: Defective item: offer an exchange before a refund.",
-      "type": "judgment"
+      "rule": "Card payments go back to the card, never cash.",
+      "type": "guardrail",
+      "probes": [
+        {
+          "from": "X4",
+          "set": {
+            "refund_method": "Cash"
+          },
+          "action": "refund"
+        }
+      ]
     }
   ],
   "records": {
