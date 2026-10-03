@@ -6,6 +6,7 @@ import { gate } from "@understudy/engine";
 import type { ApprenticeAgent } from "@understudy/voice";
 import { screenEvents } from "@/lib/session";
 import { rebuildWorkMap, workMaps } from "@/lib/workmap";
+import { sessionStats } from "@/lib/stats";
 
 const TICK_MS = 250;
 const RECENT_EVENTS = 20;
@@ -114,7 +115,9 @@ export function useInterviewLoop(opts: {
         if (pick && key && !askedKeys.current.has(key)) {
           askedKeys.current.add(key);
           agentRef.current.sendContext({ kind: "ask_now", pick });
-          setAsked((qs) => [...qs, { ...pick, t: now() }]);
+          const asked = { ...pick, t: now() };
+          setAsked((qs) => [...qs, asked]);
+          sessionStats.update(jobId, (st) => ({ ...st, questions: [...st.questions, asked] }));
         }
       } catch {
         dirty.current = true; // retry on the next quiet tick

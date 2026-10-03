@@ -14,7 +14,7 @@ export default function ModeNav({ jobId, mode }: { jobId: string; mode: "expert"
   return (
     <nav className="flex items-center justify-between px-6 pt-5 pb-4">
       <Link href="/" className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-        Understudy
+        ExpertAI
       </Link>
       <div className="flex gap-1 rounded-xl bg-slate-200/70 p-1 dark:bg-slate-900">
         {items.map((i) => (

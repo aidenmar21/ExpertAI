@@ -11,6 +11,8 @@ import { EventRow } from "@/components/ApprenticePanel";
 import type { ClientJob, JobRecord } from "@/lib/job";
 import { activity, screenEvents, sessionT } from "@/lib/session";
 import { workMaps } from "@/lib/workmap";
+import { sessionStats } from "@/lib/stats";
+import { flag } from "@/lib/flags";
 
 const STUCK_TICK_MS = 1000;
 
@@ -41,7 +43,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
   const confirmedRules = map?.rules.filter((r) => r.confirmed).length ?? 0;
 
   // Runs before every save. Not ok: block it, tell the tutor, offer the expert's moment.
-  function beforeAction(action: string, record: JobRecord): boolean {
+  function beforeAction(action: string, record: JobRecord, caseIndex: number): boolean {
     if (!map) return true;
     const check = checkAction({ action, record }, map, { job: profile as unknown as JobProfile });
     if (check.ok) {
@@ -51,6 +53,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
     }
     setBlocked({ action, check });
     setReplay(false);
+    sessionStats.update(jobId, (st) => ({ ...st, blocked: [...st.blocked, { caseIndex, action, t: sessionT() }] }));
     agent.sendContext({ kind: "guardrail_hit", check });
     return false;
   }
@@ -120,7 +123,7 @@ function TutorPanel({
 
   // Stuck detection: engine decides from the signals, the tutor offers help (voice throttles repeats).
   useEffect(() => {
-    if (!running) return;
+    if (!running || !flag("stuck")) return;
     const id = setInterval(() => {
       const a = agentRef.current;
       if (a.status !== "connected" || a.activeGuardrail) return;
@@ -252,7 +255,7 @@ function TutorPanel({
                   }`}
                 >
                   <span className="mr-1 text-xs font-medium uppercase text-slate-500">
-                    {l.speaker === "agent" ? "Tutor" : "You"}
+                    {l.speaker === "agent" ? "ExpertAI" : "You"}
                   </span>
                   {l.text}
                 </li>

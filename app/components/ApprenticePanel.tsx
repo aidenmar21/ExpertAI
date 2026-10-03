@@ -5,7 +5,9 @@ import Link from "next/link";
 import type { ScreenEvent, WorkMap } from "@understudy/shared";
 import { startCapture } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
-import { screenEvents, sessionT } from "@/lib/session";
+import { resetSession, screenEvents, sessionT } from "@/lib/session";
+import { sessionStats } from "@/lib/stats";
+import { useFlag } from "@/lib/flags";
 import { useInterviewLoop } from "@/lib/useInterviewLoop";
 import { rebuildWorkMap, workMaps } from "@/lib/workmap";
 
@@ -49,7 +51,24 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
   useEffect(() => () => capture.current?.stop(), []);
 
   const inDebrief = agent.debrief !== "idle";
-  const loop = useInterviewLoop({ agent, active: watching && !inDebrief, jobId, expert, now: sessionT });
+  const offRecord = agent.offRecord;
+  const offRecordRef = useRef(false);
+  const offRecordEnabled = useFlag("offRecord");
+
+  // Voice owns the off-the-record state (button or the expert saying it). Mirror it into the timeline gaps.
+  useEffect(() => {
+    offRecordRef.current = offRecord;
+    const t = sessionT();
+    sessionStats.update(jobId, (st) => {
+      const open = st.offRecord.find((w) => w.end === null);
+      if (offRecord && !open) return { ...st, offRecord: [...st.offRecord, { start: t, end: null }] };
+      if (!offRecord && open) return { ...st, offRecord: st.offRecord.map((w) => (w.end === null ? { ...w, end: t } : w)) };
+      return st;
+    });
+  }, [offRecord, jobId]);
+
+  const toggleOffRecord = () => agent.sendContext({ kind: "off_record", on: !offRecord });
+  const loop = useInterviewLoop({ agent, active: watching && !inDebrief && !offRecord, jobId, expert, now: sessionT });
 
   async function startDebrief() {
     setPreparing(true);
@@ -69,9 +88,11 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
 
   async function start() {
     setError(null);
+    if (screenEvents.all().length === 0) resetSession();
     try {
       capture.current = await startCapture({
         onResult: (r) => {
+          if (offRecordRef.current) return; // off the record: nothing is kept or forwarded
           for (const raw of r.events) {
             // One clock for events and transcript: stamp with the session time it arrived.
             const event = { ...raw, t: sessionT() };
@@ -119,7 +140,7 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
                     : "bg-slate-300 dark:bg-slate-600"
               }`}
             />
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Apprentice</h2>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">ExpertAI</h2>
           </div>
           {watching || connected ? (
             <button
@@ -139,7 +160,12 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
         </div>
         <div className="mt-1 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-500">{statusText}</p>
-          {watching && (
+          {offRecord && (
+            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30">
+              Off the record
+            </span>
+          )}
+          {watching && !offRecord && (
             <span
               title="Gate: opens after 1.5s of quiet on input, speech, and screen"
               className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -148,18 +174,33 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
                   : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
               }`}
             >
-              {loop.gateOpen ? "Quiet: may ask" : "Busy: holding questions"}
+              {loop.gateOpen ? "Quiet: ExpertAI may ask" : "Busy: holding questions"}
             </span>
           )}
         </div>
         {connected && !inDebrief && (
-          <button
-            onClick={startDebrief}
-            disabled={preparing}
-            className="mt-3 w-full rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-60"
-          >
-            {preparing ? "Preparing debrief…" : "Finish & debrief"}
-          </button>
+          <div className="mt-3 flex gap-2">
+            {offRecordEnabled && (
+              <button
+                onClick={toggleOffRecord}
+                aria-pressed={offRecord}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  offRecord
+                    ? "bg-rose-600 text-white shadow-sm hover:bg-rose-500"
+                    : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                }`}
+              >
+                {offRecord ? "Back on the record" : "Off the record"}
+              </button>
+            )}
+            <button
+              onClick={startDebrief}
+              disabled={preparing || offRecord}
+              className="flex-1 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-60"
+            >
+              {preparing ? "Preparing debrief…" : "Finish & debrief"}
+            </button>
+          </div>
         )}
         {(error || agent.error) && (
           <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
@@ -197,7 +238,7 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
         <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Screen events</p>
         {events.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
-            Events appear here as the apprentice notices changes.
+            Events appear here as ExpertAI notices changes.
           </p>
         ) : (
           <ol className="space-y-2">
@@ -242,7 +283,7 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
                   }`}
                 >
                   <span className="mr-1 text-xs font-medium uppercase text-slate-500">
-                    {l.speaker === "agent" ? "Apprentice" : l.speaker.replace("_", " ")}
+                    {l.speaker === "agent" ? "ExpertAI" : l.speaker.replace("_", " ")}
                   </span>
                   {l.text}
                 </li>
@@ -311,7 +352,7 @@ function DebriefCard({ agent, jobId, map }: { agent: ApprenticeAgent; jobId: str
 
       {agent.debrief === "teach_back" && (
         <div className="mt-4">
-          <p className="text-xs text-slate-500">The apprentice explains it back. Say &ldquo;yes&rdquo; to confirm, or correct it.</p>
+          <p className="text-xs text-slate-500">ExpertAI explains it back. Say &ldquo;yes&rdquo; to confirm, or correct it.</p>
           {agent.teachBack ? (
             <p className="mt-2 rounded-xl bg-white px-3 py-2.5 text-sm leading-relaxed text-slate-800 dark:bg-slate-900 dark:text-slate-200">
               {agent.teachBack}

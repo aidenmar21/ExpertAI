@@ -2,19 +2,64 @@
 
 import type { ScreenEvent, Value } from "@understudy/shared";
 
-/** One session clock shared by the fake app, capture, and the panel. */
-export const sessionStart = typeof performance !== "undefined" ? performance.now() : 0;
-export const sessionT = () => Math.round(performance.now() - sessionStart);
+/**
+ * One session clock shared by the fake app, capture, the panel, and the voice transcript.
+ * Anchored to wall time and kept in sessionStorage so expert and new-hire tabs share it.
+ */
+const sessionStart = (() => {
+  if (typeof window === "undefined") return Date.now();
+  try {
+    const raw = sessionStorage.getItem("expertai:session-start");
+    if (raw) return Number(raw);
+    sessionStorage.setItem("expertai:session-start", String(Date.now()));
+  } catch {
+    /* storage unavailable */
+  }
+  return Date.now();
+})();
+export const sessionT = () => Date.now() - sessionStart;
 
-function store<T>() {
-  let items: T[] = [];
+/** Start a fresh session: new clock, no events, no ground truth. */
+export function resetSession() {
+  try {
+    sessionStorage.setItem("expertai:session-start", String(Date.now()));
+  } catch {
+    /* storage unavailable */
+  }
+  screenEvents.clear();
+  groundTruth.clear();
+}
+
+function store<T>(key: string) {
+  let items: T[] | null = null;
   const subs = new Set<() => void>();
+  const load = (): T[] => {
+    if (items) return items;
+    try {
+      const raw = localStorage.getItem(key);
+      items = raw ? (JSON.parse(raw) as T[]) : [];
+    } catch {
+      items = [];
+    }
+    return items;
+  };
+  const save = (next: T[]) => {
+    items = next;
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+    subs.forEach((s) => s());
+  };
   return {
     push(item: T) {
-      items = [...items, item];
-      subs.forEach((s) => s());
+      save([...load(), item]);
     },
-    all: () => items,
+    clear() {
+      save([]);
+    },
+    all: () => load(),
     subscribe(fn: () => void) {
       subs.add(fn);
       return () => {
@@ -29,13 +74,13 @@ function store<T>() {
  * Never render it on screen and never send it to the agent.
  */
 export interface TrueChange { t: number; field: string; from: Value; to: Value; record: string | null; }
-export const groundTruth = store<TrueChange>();
+export const groundTruth = store<TrueChange>("expertai:ground-truth");
 
 /** Events the engine saw on screen; the apprentice panel renders these. */
-export const screenEvents = store<ScreenEvent>();
+export const screenEvents = store<ScreenEvent>("expertai:events");
 
 if (typeof window !== "undefined") {
-  (window as unknown as Record<string, unknown>).__understudy = {
+  (window as unknown as Record<string, unknown>).__expertai = {
     groundTruth: () => groundTruth.all(),
     screenEvents: () => screenEvents.all(),
   };

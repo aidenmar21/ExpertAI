@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import type { Condition, Rule, RuleType, WorkMap } from "@understudy/shared";
 import { workMaps } from "@/lib/workmap";
+import { sessionStats } from "@/lib/stats";
+import Scoreboard from "@/components/Scoreboard";
 
 const TYPE_STYLE: Record<RuleType, string> = {
   guardrail: "bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30",
@@ -19,6 +21,8 @@ const OP_WORDS: Record<Condition["op"], string> = {
 
 export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName: string }) {
   const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
+  const stats = useSyncExternalStore(sessionStats.subscribe, () => sessionStats.get(jobId), () => sessionStats.get(jobId));
+  const gaps = stats.offRecord;
 
   return (
     <main className="mx-auto max-w-5xl px-6 pb-10 pt-4">
@@ -56,7 +60,7 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
 
       {!map ? (
         <p className="mt-10 rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500 dark:border-slate-700">
-          No Work Map yet. Start watching on the job screen, explain a few decisions, then finish with a debrief.
+          No Work Map yet. Start an expert session on the job screen, explain a few decisions, then finish with a debrief.
         </p>
       ) : (
         <>
@@ -67,6 +71,8 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
             <Stat label="Open gaps" value={map.open_gaps.length} />
           </dl>
 
+          <Scoreboard jobId={jobId} map={map} />
+
           <div className="mt-10 grid gap-10 lg:grid-cols-5">
             <section className="lg:col-span-2">
               <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Timeline</h2>
@@ -74,25 +80,18 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
                 <p className="mt-4 text-sm text-slate-500">No steps captured.</p>
               ) : (
                 <ol className="relative mt-4 space-y-6 border-l border-slate-200 pl-6 dark:border-slate-800">
-                  {map.steps.map((s) => (
-                    <li key={s.n} className="relative">
-                      <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-sky-500 ring-4 ring-slate-100 dark:ring-slate-950" />
-                      <p className="text-xs tabular-nums text-slate-500">
-                        {formatT(s.screen_moment.t)}
-                        {s.screen_moment.record ? ` · ${s.screen_moment.record}` : ""}
-                      </p>
-                      <p className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">{s.title}</p>
-                      <p className="text-sm text-slate-600 dark:text-slate-300">{s.decision}</p>
-                      {s.rule_ids.length > 0 && (
-                        <p className="mt-1 text-xs text-teal-700 dark:text-teal-300">
-                          {s.rule_ids.length} rule{s.rule_ids.length > 1 ? "s" : ""} learned here
-                        </p>
-                      )}
-                    </li>
-                  ))}
+                  {timeline(map.steps, gaps).map((item) =>
+                    item.kind === "gap" ? (
+                      <OffRecordGap key={`gap-${item.start}`} start={item.start} end={item.end} />
+                    ) : (
+                      <StepItem key={item.step.n} s={item.step} />
+                    ),
+                  )}
                 </ol>
               )}
             </section>
+            {/* step markup lives in StepItem below */}
+            
 
             <section className="lg:col-span-3">
               <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Rules, in the expert&rsquo;s words</h2>
@@ -181,6 +180,53 @@ function Stat({ label, value }: { label: string; value: number }) {
       <dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">{value}</dd>
     </div>
   );
+}
+
+
+function StepItem({ s }: { s: WorkMap["steps"][number] }) {
+  return (
+    <li className="relative">
+                      <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-sky-500 ring-4 ring-slate-100 dark:ring-slate-950" />
+                      <p className="text-xs tabular-nums text-slate-500">
+                        {formatT(s.screen_moment.t)}
+                        {s.screen_moment.record ? ` · ${s.screen_moment.record}` : ""}
+                      </p>
+                      <p className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">{s.title}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300">{s.decision}</p>
+                      {s.rule_ids.length > 0 && (
+                        <p className="mt-1 text-xs text-teal-700 dark:text-teal-300">
+                          {s.rule_ids.length} rule{s.rule_ids.length > 1 ? "s" : ""} learned here
+                        </p>
+                      )}
+                    </li>
+  );
+}
+
+function OffRecordGap({ start, end }: { start: number; end: number | null }) {
+  return (
+    <li className="relative">
+      <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-400 ring-4 ring-slate-100 dark:ring-slate-950" />
+      <div
+        className="rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/30 dark:text-rose-300"
+        style={{ backgroundImage: "repeating-linear-gradient(135deg, rgba(244,63,94,0.14) 0 6px, transparent 6px 12px)" }}
+      >
+        Off the record · {formatT(start)}–{end === null ? "now" : formatT(end)}. Nothing from this window was kept.
+      </div>
+    </li>
+  );
+}
+
+type TimelineItem =
+  | { kind: "step"; step: WorkMap["steps"][number]; t: number }
+  | { kind: "gap"; start: number; end: number | null; t: number };
+
+/** Steps and off-the-record gaps in one time order. */
+function timeline(steps: WorkMap["steps"], gaps: { start: number; end: number | null }[]): TimelineItem[] {
+  const items: TimelineItem[] = [
+    ...steps.map((step) => ({ kind: "step" as const, step, t: step.screen_moment.t })),
+    ...gaps.map((g) => ({ kind: "gap" as const, start: g.start, end: g.end, t: g.start })),
+  ];
+  return items.sort((a, b) => a.t - b.t);
 }
 
 const noMap = (): WorkMap | null => null;
