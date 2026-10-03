@@ -54,7 +54,6 @@ The coordinator owns the gap between recruiting and the first day. The company n
 - **No signed standalone FCRA disclosure and authorization**: do not order the report.
 - **Access or equipment requested before `offer_signed` is Yes**: refuse.
 - **Hire needs visa sponsorship or transfer (H-1B, TN, OPT)**: the start date is set by immigration counsel's confirmation of work authorization, not the manager.
-- **Hire under 18**: state work-permit and hour rules apply; confirm with the HR partner first.
 
 ## 7. Mistakes new hires commonly make
 - Doing Section 2 "when the hire brings documents" and missing the 3-business-day deadline. Every late form is a per-form fine in an ICE audit.
@@ -62,7 +61,6 @@ The coordinator owns the gap between recruiting and the first day. The company n
 - Reading background detail to the hiring manager. It breaches FCRA confidentiality and taints the decision.
 - Marking Ready for day one because the packet was sent, not received. Payroll has no W-4 and no bank account on payday.
 - Letting IT provision accounts off a verbal acceptance. If the offer collapses there is a live company account with no employee.
-- Giving W-4 advice. One wrong entry and the hire's under-withholding is HR's fault in April.
 - Treating "Section 1 done" as the whole I-9. The employer half carries the deadline.
 
 ## 8. Vocabulary
