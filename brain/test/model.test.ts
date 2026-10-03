@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Value } from "@understudy/shared";
 import { checkAction, correctWorkMap, workMapToAgentText, type WorkMapWithRecords } from "../index";
 import { buildWorkMap, confirmWorkMap, loadJob } from "../server";
-import { events, transcript, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
+import { events, transcript, debrief, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
 for (const p of [join(process.cwd(), ".env.local"), join(process.cwd(), "app/.env.local"), join(process.cwd(), "../app/.env.local"), join(process.cwd(), "../.env.local")]) {
   if (!process.env.ANTHROPIC_API_KEY && existsSync(p)) process.loadEnvFile(p);
@@ -91,6 +91,20 @@ const show = (m: WorkMapWithRecords) => {
   assert.equal(after.N1.ok, true, "$142 now under the corrected $200 limit");
   assert.equal(after.big.ok, false, "$250 blocked by the corrected limit");
   assert.equal(after.N3.ok, false, "no-receipt rule restated in the correction still holds");
+
+  // 5b. Spoken debrief + teach-back, exactly as the app sends it: no correctWorkMap call.
+  t0 = Date.now();
+  const spoken = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript: [...transcript, ...debrief], previous: conf });
+  console.log(`\n[3b] spoken debrief + teach-back: ${spoken.rules.length} rules, ${Date.now() - t0}ms`);
+  for (const [t, k] of Object.entries(spoken.links ?? {})) console.log(`    line t=${t} -> ${k ? `${k.kind} on ${k.record_id}: "${k.text}"` : "not about a decision"}`);
+  show(spoken);
+  assert.ok(!spoken.open_gaps.some((g) => g.about_event_id === "e0"), "debrief answer closed the X1 gap");
+  assert.equal(spoken.links?.["442000"] ?? null, null, "'Yes, that's right' is not linked");
+  assert.equal(spoken.records.find((x) => x.id === x3id)!.status, "corrected", "spoken correction detected");
+  assert.ok(!spoken.rules.some((x) => x.when.some((c) => c.field === "price" && c.value === 100)), "obsolete $100 rule gone");
+  const spokenConf = confirmWorkMap(spoken);   // app confirms after the final "yes"
+  assert.equal(check(spokenConf, "refund", nh[0]).ok, true, "$142 allowed under the spoken $200 limit");
+  assert.equal(check(spokenConf, "refund", { ...nh[0], price: 250 }).ok, false, "$250 blocked");
 
   // 6. Aarav's live case: two independent rules in ONE answer must not merge their conditions.
   t0 = Date.now();

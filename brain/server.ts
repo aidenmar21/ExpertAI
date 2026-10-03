@@ -7,7 +7,8 @@ import type {
 } from "@understudy/shared";
 import { canonicalEvents, emptyWorkMap, onRecordOnly } from "./index";
 import {
-  applyCorrections, captureDecisions, recordsToGaps, type DecisionRecord, type WorkMapWithRecords,
+  applyCorrections, applyLinks, captureDecisions, linksToCorrections, recordsToGaps, unlinkedExpertLines, validateLinks,
+  type DecisionRecord, type LineLink, type WorkMapWithRecords,
 } from "./records";
 import {
   OPS, RULE_TYPES, expertCases, validateCandidates,
@@ -185,6 +186,64 @@ export async function extractRules(records: DecisionRecord[], job: JobProfile, c
   }
 }
 
+// ---------- Late links: debrief answers and teach-back corrections ----------
+const LINKS_SCHEMA = {
+  type: "object",
+  properties: {
+    links: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line_t: { type: "number" },
+          record_id: { type: "string" },
+          kind: { type: "string", enum: ["why", "exception", "guardrail", "correction"] },
+          text: { type: "string" },
+        },
+        required: ["line_t", "record_id", "kind", "text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["links"],
+  additionalProperties: false,
+} as const;
+
+const LINK_SYSTEM = `You connect an expert's later remarks (debrief answers, teach-back corrections) to the decisions they explain.
+For each expert line, decide if it is about one of the listed decisions. If it is, return a link:
+- kind "why": it explains a decision whose why is null or adds a reason.
+- kind "exception": what would make them decide differently.
+- kind "guardrail": when they would stop, escalate, or never do something.
+- kind "correction": it changes or contradicts reasoning already recorded for that decision ("no, it's two hundred, not a hundred").
+- text: copy the relevant words verbatim from the line. Never paraphrase.
+Skip lines that are small talk, confirmations ("yes, that's right"), or not about a listed decision. Return {"links": []} if none apply.`;
+
+// Asks the model to link expert lines no question captured. Returns validated links, or null if the call failed.
+export async function linkLines(records: DecisionRecord[], lines: TranscriptLine[], transcript: TranscriptLine[]): Promise<LineLink[] | null> {
+  if (!lines.length || !records.length || !process.env.ANTHROPIC_API_KEY) return lines.length ? null : [];
+  const client = new Anthropic();
+  const before = (t: number) => [...transcript].reverse().find((l) => l.t < t && l.speaker === "agent" && !l.off_record)?.text ?? null;
+  try {
+    const res = await client.messages.create({
+      model: process.env.LLM_MODEL || "claude-opus-5-5",
+      max_tokens: 8000,
+      output_config: { effort: "low", format: { type: "json_schema", schema: LINKS_SCHEMA } },
+      system: LINK_SYSTEM,
+      messages: [{ role: "user", content: JSON.stringify({
+        decisions: records.map((r) => ({ record_id: r.id, record: r.record, what: r.what, how: r.how, why: r.why, quotes: r.quotes })),
+        expert_lines: lines.map((l) => ({ line_t: l.t, agent_asked: before(l.t), text: l.text })),
+      }) }],
+    });
+    if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return null;
+    const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    return validateLinks((JSON.parse(text) as { links: LineLink[] }).links, records, lines);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) console.error(`[brain] line linking failed: ${err.status} ${err.message}`);
+    else console.error("[brain] line linking failed:", err);
+    return null;
+  }
+}
+
 // ---------- buildWorkMap ----------
 function stepsFrom(records: DecisionRecord[], rules: Rule[], evidence: Record<string, RuleEvidence>): WorkMapStep[] {
   return records.map((r, i) => ({
@@ -210,7 +269,19 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   const events = canonicalEvents(job, input.events);
 
   let records = captureDecisions({ events, transcript: input.transcript, piiNames: pii, escalateTo: job.job.escalate_to });
-  records = applyCorrections(records, corrections, pii);
+
+  // Late links: expert lines no question captured (debrief answers, spoken corrections). Each line is sent to the model once.
+  const links: Record<string, LineLink | null> = { ...(prev?.links ?? {}) };
+  const fresh = unlinkedExpertLines(records, input.transcript).filter((l) => !(String(l.t) in links));
+  const found = await linkLines(records, fresh, input.transcript);
+  if (found) {
+    for (const l of fresh) links[String(l.t)] = null;
+    for (const k of found) links[String(k.line_t)] = k;
+  }
+  const valid = validateLinks(Object.values(links).filter((k): k is LineLink => !!k), records, input.transcript.filter((l) => !l.off_record));
+  records = applyLinks(records, valid, pii);
+  const allCorrections = [...corrections, ...linksToCorrections(valid).filter((c) => !corrections.some((x) => x.t === c.t))];
+  records = applyCorrections(records, allCorrections, pii);
 
   const prevRecords = new Map((prev?.records ?? []).map((r) => [r.id, r]));
   const prevEvidence = prev?.rule_sources ?? {};
@@ -224,18 +295,18 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   const kept = (prev?.rules ?? []).filter((x) => unchanged.has(prevEvidence[x.id]?.record_id ?? ""));
   const todo = records.filter((r) => !unchanged.has(r.id));
   const cases = expertCases(job, onRecordOnly(events, input.transcript).events, (rec) => screenValues(job, rec));
-  const fresh = await extractRules(todo, job, cases);
+  const extractedNow = await extractRules(todo, job, cases);
 
-  const rules = [...kept, ...fresh.rules];
+  const rules = [...kept, ...extractedNow.rules];
   const rule_sources: Record<string, RuleEvidence> = {};
   for (const x of kept) rule_sources[x.id] = prevEvidence[x.id];
-  Object.assign(rule_sources, fresh.evidence);
+  Object.assign(rule_sources, extractedNow.evidence);
 
   // Remember what rules were built from, so unchanged records skip the model next time.
   const extracted: Record<string, string> = {};
   for (const r of records) {
     if (unchanged.has(r.id)) extracted[r.id] = prev!.extracted![r.id];
-    else if (fresh.ok && r.why !== null) extracted[r.id] = signature(r);
+    else if (extractedNow.ok && r.why !== null) extracted[r.id] = signature(r);
   }
 
   return {
@@ -248,8 +319,9 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
     records,
     rule_sources,
     corrections,
+    links,
     extracted,
-    rejected_rules: fresh.rejected.map((r) => ({ record_id: r.candidate.record_id, text: r.candidate.text, reason: r.reason })),
+    rejected_rules: extractedNow.rejected.map((r) => ({ record_id: r.candidate.record_id, text: r.candidate.text, reason: r.reason })),
   };
 }
 

@@ -43,7 +43,8 @@ export interface CaptureInput {
 
 // ---------- Helpers ----------
 const MEANINGFUL: ScreenEvent["type"][] = ["field_changed", "status_changed", "note_added"];
-const EVENT_LINK_MS = 90_000;   // an answer explains an event up to 90s before the question
+const EVENT_LINK_MS = 90_000;     // an answer explains an event up to 90s before the question
+const ANSWER_WINDOW_MS = 60_000;  // expert lines later than this after a question are not its answer
 
 export function isMeaningful(e: ScreenEvent): boolean {
   return MEANINGFUL.includes(e.type) && e.confidence >= 0.5;
@@ -53,7 +54,7 @@ export function classifyQuestion(text: string): QuestionKind | null {
   const s = text.toLowerCase();
   if (!s.includes("?")) return null;
   if (/\b(stop|ask (someone|a|the|your)|manager|escalat|never|not allowed|call (a|the|your))/.test(s)) return "when_to_stop";
-  if (/\b(chang|differen|otherwise|exception|unless|instead|what if|every time|always)/.test(s)) return "what_would_change";
+  if (/\b(what would|would you ever|differen|otherwise|exception|unless|instead|what if|every time|always)/.test(s)) return "what_would_change";
   if (/\b(why|reason|how come|what made you|how did you decide)\b/.test(s)) return "why";
   return "why";
 }
@@ -109,6 +110,8 @@ export function onRecordOnly(events: ScreenEvent[], transcript: TranscriptLine[]
 // Unanswered meaningful events become records with why=null (open gaps). Nothing is invented.
 export function captureDecisions(input: CaptureInput): DecisionRecord[] {
   const { events, transcript } = onRecordOnly(input.events, input.transcript);
+  const wins = offRecordWindows(input.transcript);
+  const offBetween = (a: number, b: number) => wins.some((w) => w.start > a && w.start < b);
   const evs = [...events].sort((a, b) => a.t - b.t);
   const lines = [...transcript].sort((a, b) => a.t - b.t);
   const byEvent = new Map<string, DecisionRecord>();
@@ -139,19 +142,25 @@ export function captureDecisions(input: CaptureInput): DecisionRecord[] {
 
     // Expert answer = consecutive expert lines after the question, until the next agent line.
     const answer: TranscriptLine[] = [];
-    for (let j = i + 1; j < lines.length && lines[j].speaker !== "agent"; j++) {
+    for (let j = i + 1; j < lines.length && lines[j].speaker !== "agent" && lines[j].t - q.t <= ANSWER_WINDOW_MS && !offBetween(q.t, lines[j].t); j++) {
       if (lines[j].speaker === "expert") answer.push(lines[j]);
     }
 
-    // Event = latest meaningful event at or before the question (within the link window).
-    const ev = [...evs].reverse().find((e) => isMeaningful(e) && e.t <= q.t && q.t - e.t <= EVENT_LINK_MS);
+    // Event = the record the question names (any age, e.g. debrief "on R-88101"),
+    // else the latest meaningful event at or before the question (within the link window).
+    const named = [...evs].reverse().find((e) => isMeaningful(e) && e.record && e.t <= q.t && q.text.includes(e.record));
+    const ev = named ?? [...evs].reverse().find((e) => isMeaningful(e) && e.t <= q.t && q.t - e.t <= EVENT_LINK_MS);
     if (!ev) continue;
     const r = recordFor(ev);
     if (!r.asked.includes(kind)) r.asked.push(kind);
     r.sources.transcript_t.push(q.t);
 
     const text = answer.map((a) => a.text.trim()).join(" ").trim();
-    if (!text || isVague(text)) { if (!r.unknown.includes(kind)) r.unknown.push(kind); continue; }
+    if (!text || isVague(text)) {
+      r.sources.transcript_t.push(...answer.map((a) => a.t));   // answered (vaguely): not a candidate for late linking
+      if (!r.unknown.includes(kind)) r.unknown.push(kind);
+      continue;
+    }
 
     const said = clean(text);
     r.quotes.push(said);
@@ -197,6 +206,50 @@ export function recordsToGaps(records: DecisionRecord[]): OpenGap[] {
     .map((r) => ({ id: `gap-${r.id}`, question: questionFor(r, "why"), about_event_id: r.sources.event_ids[0] }));
 }
 
+// ---------- Late links (debrief answers, teach-back corrections) ----------
+// An expert line that captureDecisions could not tie to a decision, attached later (by the model on the server).
+export type LinkKind = "why" | "exception" | "guardrail" | "correction";
+export interface LineLink { line_t: number; record_id: string; kind: LinkKind; text: string }
+
+// On-record expert lines not used by any record: candidates for late linking.
+export function unlinkedExpertLines(records: DecisionRecord[], transcript: TranscriptLine[]): TranscriptLine[] {
+  const used = new Set(records.flatMap((r) => r.sources.transcript_t));
+  const { transcript: on } = onRecordOnly([], transcript);
+  return on.filter((l) => l.speaker === "expert" && !used.has(l.t) && l.text.trim().length >= 8);
+}
+
+// Keeps a link only if its text is the expert's exact words from that on-record line and the record exists.
+export function validateLinks(links: LineLink[], records: DecisionRecord[], lines: TranscriptLine[]): LineLink[] {
+  const byT = new Map(lines.map((l) => [l.t, l]));
+  const ids = new Set(records.map((r) => r.id));
+  const norm = (x: string) => x.toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z0-9$€.']+/g, " ").trim();
+  return links.filter((k) => {
+    const line = byT.get(k.line_t);
+    return !!line && ids.has(k.record_id) && norm(k.text).length >= 8 && norm(line.text).includes(norm(k.text))
+      && ["why", "exception", "guardrail", "correction"].includes(k.kind);
+  });
+}
+
+// Adds non-correction links to their records as the expert's own words. Corrections go through applyCorrections.
+export function applyLinks(records: DecisionRecord[], links: LineLink[], piiNames: string[] = []): DecisionRecord[] {
+  return records.map((r) => {
+    const mine = links.filter((k) => k.record_id === r.id && k.kind !== "correction").sort((a, b) => a.line_t - b.line_t);
+    if (!mine.length) return r;
+    const out: DecisionRecord = { ...r, quotes: [...r.quotes], quote_t: [...(r.quote_t ?? [])], exceptions: [...r.exceptions], guardrails: [...r.guardrails], sources: { ...r.sources, transcript_t: [...r.sources.transcript_t] } };
+    for (const k of mine) {
+      const said = redact(k.text, piiNames);
+      out.quotes.push(said); out.quote_t!.push(k.line_t); out.sources.transcript_t.push(k.line_t);
+      if (k.kind === "why") { out.why = out.why ? `${out.why} ${said}` : said; out.unknown = out.unknown.filter((x) => x !== "why"); }
+      else if (k.kind === "exception") out.exceptions.push(said);
+      else out.guardrails.push(said);
+    }
+    return out;
+  });
+}
+
+export const linksToCorrections = (links: LineLink[]): Correction[] =>
+  links.filter((k) => k.kind === "correction").map((k) => ({ record_id: k.record_id, text: k.text, t: k.line_t }));
+
 // ---------- Work Map with records ----------
 // What the expert said to correct a decision, e.g. in the debrief or teach-back.
 export interface Correction { record_id: string; text: string; t: number }
@@ -208,6 +261,7 @@ export type WorkMapWithRecords = WorkMap & {
   corrections?: Correction[];
   extracted?: Record<string, string>;      // record id -> quotes signature the rules were built from
   rejected_rules?: { record_id: string; text: string; reason: string }[];
+  links?: Record<string, LineLink | null>;  // transcript t -> late link (null = checked, not about a decision)
 };
 
 // Replaces a record's reasoning with the expert's correction. Old quotes are kept only as history,

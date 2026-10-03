@@ -6,10 +6,11 @@ import type { Rule } from "@understudy/shared";
 import {
   captureDecisions, pickFromRecords, checkAction, canonicalField, canonicalEvents, score, nextQuestionKind, questionFor,
   workMapToAgentText, redact, validateCandidates, expertCases, applyCorrections, correctWorkMap,
+  unlinkedExpertLines, validateLinks, classifyQuestion, type LineLink,
   type RuleCandidate, type WorkMapWithRecords,
 } from "../index";
 import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, screenValues } from "../server";
-import { events, transcript, ev, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
+import { events, transcript, debrief, ev, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
 delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
 
@@ -47,6 +48,8 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
   assert.equal(pickFromRecords(evs.slice(0, 1), [], { now: 200_000 }), null, "stale -> silent");
   assert.equal(nextQuestionKind({ ...x3, asked: ["why", "what_would_change", "when_to_stop"] }), null, "no repeats");
   assert.equal(questionFor(x4, "why"), "Why did you change refund_method from Cash to Original card on R-88104?");
+  assert.equal(classifyQuestion("Why did you change status from Open to Denied on R-88102?"), "why", "a 'why did you change' question is a why");
+  assert.equal(classifyQuestion("What would make you decide differently on a case like R-88102?"), "what_would_change");
   console.log("ok picker");
 
   // 3. Validation of SIMULATED model candidates.
@@ -144,6 +147,30 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
   assert.equal(stale.rules.length, 0, "old quotes cannot ground a rule after the correction");
   assert.equal(applyCorrections(recs, [])[0], recs[0]);
   console.log("ok correction: obsolete rules dropped; old quotes can no longer ground rules");
+
+  // 5b. Debrief: a question naming the record links at any age; spoken correction via (SIMULATED) model links.
+  const full = [...transcript, ...debrief];
+  const drec = captureDecisions({ events: evs, transcript: full });
+  assert.match(drec.find((r) => r.sources.event_ids[0] === "e0")!.why!, /Routine one/, "debrief answer linked by record id, minutes later");
+  const loose = unlinkedExpertLines(drec, full);
+  assert.deepEqual(loose.map((l) => l.t), [160_000, 425_000, 442_000], "only unanswered on-record lines are offered; off-record and vague answers are not");
+  const x3d = drec.find((r) => r.sources.event_ids[0] === "e2")!;
+  const sim: LineLink[] = [
+    { line_t: 425_000, record_id: x3d.id, kind: "correction", text: "The shift manager limit is two hundred dollars, not a hundred." },
+    { line_t: 425_000, record_id: x3d.id, kind: "correction", text: "The limit is two hundred" },          // paraphrase: not verbatim
+    { line_t: 151_000, record_id: x3d.id, kind: "why", text: "Regulars always get cash" },              // off-record line
+    { line_t: 442_000, record_id: "dr-nope", kind: "why", text: "Yes, that's right." },                  // unknown record
+  ];
+  const kept = validateLinks(sim, drec, full.filter((l) => !l.off_record));
+  assert.equal(kept.length, 1, "only the verbatim, on-record, known-record link survives");
+  const spoken = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript: full,
+    previous: { ...prev, links: { "160000": null, "425000": kept[0], "442000": null } } as WorkMapWithRecords });
+  const x3s = spoken.records.find((r) => r.id === x3d.id)!;
+  assert.equal(x3s.status, "corrected");
+  assert.deepEqual(x3s.quotes, ["The shift manager limit is two hundred dollars, not a hundred."]);
+  assert.ok(!spoken.rules.some((r) => spoken.rule_sources![r.id]?.record_id === x3d.id), "obsolete rules dropped after a spoken correction");
+  assert.ok(!spoken.open_gaps.some((g) => g.about_event_id === "e0"), "debrief answer closed the X1 gap");
+  console.log("ok debrief: record-named question linked late; spoken correction applied; paraphrase/off-record links rejected");
 
   // 6. Work Map without a key: records, steps, gaps, no rules, no leaks.
   const map = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript });

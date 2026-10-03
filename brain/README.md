@@ -37,14 +37,17 @@ return Response.json(map);
 - Without `ANTHROPIC_API_KEY` you still get records, steps, and open gaps, but no rules. A failed model call is retried on the next build.
 - `map.rejected_rules` lists model rules that failed validation, with reasons. It's for debugging; don't show it to the agent.
 
-### Teach-back and corrections (server or client)
+### Teach-back and corrections
+Spoken debrief answers and teach-back corrections are picked up **automatically** from the transcript. No extra call is needed:
+- A question that names the record ("...on R-88101?") links its answer at any age. Otherwise an answer must come within 60s of the question, and never across an off-record stretch.
+- Expert lines no question captured are sent to the model **once** (cached in `map.links`). The model may link a line to a decision as `why`, `exception`, `guardrail`, or `correction`, but only by quoting the line verbatim. Brain validates the quote, that the line is on the record, and that the record exists.
+- A `correction` replaces that decision's reasoning. Its old rules are dropped, and new ones are extracted from the correction, unconfirmed.
+
 ```ts
-import { confirmWorkMap } from "@understudy/brain/server";
-import { correctWorkMap } from "@understudy/brain";
-map = confirmWorkMap(map);                       // expert said "yes, that's right": rules now enforce
-map = correctWorkMap(map, { record_id, text, t }); // expert corrected a decision (their exact words)
-map = await buildWorkMap({ ..., previous: map }); // obsolete rules from that record are dropped and re-extracted, unconfirmed
-map = confirmWorkMap(map);                       // after the corrected teach-back
+// expert said "yes, that's right" -> POST /api/workmap { ..., confirm: true }
+map = confirmWorkMap(await buildWorkMap({ ..., previous: map }));   // rules now enforce
+// optional, for a UI edit (not speech):
+map = correctWorkMap(map, { record_id, text, t });
 ```
 `record_id` is a `map.records[i].id`. `steps[i].screen_moment` and `open_gaps[i].about_event_id` point to it.
 
@@ -94,11 +97,13 @@ export interface DecisionRecord {
 }
 export interface RuleEvidence { record_id: string; quote_index: number; quote_t: number | null; event_ids: string[] }
 export interface Correction { record_id: string; text: string; t: number }
+export interface LineLink { line_t: number; record_id: string; kind: "why" | "exception" | "guardrail" | "correction"; text: string }
 
 // on WorkMap (all optional):
 //   records?: DecisionRecord[];
 //   rule_sources?: Record<string, RuleEvidence>;
 //   corrections?: Correction[];
+//   links?: Record<string, LineLink | null>;
 
 // checkAction gains an optional 3rd arg:
 // checkAction(a: ProposedAction, map: WorkMap, opts?: { job?: JobProfile; includeUnconfirmed?: boolean }): CheckResult
@@ -106,5 +111,5 @@ export interface Correction { record_id: string; text: string; t: number }
 Until then these types are exported from `@understudy/brain`.
 
 ## Tests
-- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
-- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, and a two-sentence answer that must give two separate rules. Exits 2 if no key is found.
+- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, debrief linking, and a spoken correction (with simulated model links), confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
+- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, a two-sentence answer that must give two separate rules, and a spoken debrief + teach-back correction exactly as the app sends it. Exits 2 if no key is found.

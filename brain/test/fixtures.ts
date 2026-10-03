@@ -38,3 +38,13 @@ export const OFF_RECORD_MARKERS = /regulars|cousin|never checks|4417/i;
 
 // The expert corrects the X3 limit during the debrief.
 export const CORRECTION_TEXT = "Actually the shift manager limit is two hundred dollars, not a hundred. No receipt still means store credit only.";
+
+// Debrief + teach-back after the session (minutes later). The correction is SPOKEN, not passed via correctWorkMap.
+export const debrief: TranscriptLine[] = [
+  L(400_000, "agent", "Why did you change status from Open to Refunded on R-88101?"),
+  L(402_000, "expert", "Routine one, it was new and well inside thirty days."),
+  L(420_000, "agent", "Here's what I learned: opened access codes can't be refunded, no receipt means store credit only, and over a hundred dollars you call the shift manager. Is that right?"),
+  L(425_000, "expert", "Almost. The shift manager limit is two hundred dollars, not a hundred."),
+  L(440_000, "agent", "Got it: over two hundred dollars you call the shift manager. Is that right?"),
+  L(442_000, "expert", "Yes, that's right."),
+];
