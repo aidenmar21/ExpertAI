@@ -59,11 +59,12 @@ export async function startCapture(opts: {
   }
 
   const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
     stream.getTracks().forEach((track) => track.stop());
     throw new Error("capture canvas unavailable");
   }
+  const ctx = context;
 
   let stopped = false;
   let inFlight = false;
