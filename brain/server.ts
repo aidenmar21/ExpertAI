@@ -115,7 +115,9 @@ Strict grounding:
 - Conditions use only the listed screen field keys; actions use only the listed action keys.
 - A rule with no conditions applies to every case, so only emit when=[] if the expert said "always".
 - Use op "missing" for "no receipt"-style statements, numeric ops for amount limits.
-- Scope: each record has screen_values (what was on screen for that case). Include a condition on every field the expert's reason depends on, so the rule does NOT fire on cases where the reason doesn't apply. Example: "opened access codes are never refundable" needs condition=Opened AND the item field identifying the access-code product, not condition alone. If the distinguishing value can only be named exactly, use eq or in with the exact on-screen value(s).
+- Scope conditions to the quote, not the case. Add a condition only for something the expert's words state or directly imply ("over a hundred dollars" -> price gt 100; "no receipt" -> receipt_no missing). Never copy other facts of the case the expert happened to be on: a general statement made during a no-receipt case is still general.
+- screen_values shows what was on screen for that case. Use it only to find the exact field and value for something the expert named (e.g. "access codes" -> item eq the on-screen access-code product). Use eq or in with the exact on-screen value(s).
+- When one answer states several independent rules, emit them as separate rules.
 Return {"rules": []} if nothing is grounded.`;
 
 function norm(s: string): string {
