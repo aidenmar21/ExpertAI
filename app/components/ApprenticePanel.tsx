@@ -5,17 +5,18 @@ import type { ScreenEvent } from "@understudy/shared";
 import { startCapture } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent } from "@understudy/voice";
 import { screenEvents, sessionT } from "@/lib/session";
+import { useInterviewLoop } from "@/lib/useInterviewLoop";
 
 /** Live feed of what the apprentice saw on screen, plus the voice agent. */
-export default function ApprenticePanel({ expert = "Aarav" }: { expert?: string }) {
+export default function ApprenticePanel({ jobId, expert = "Aarav" }: { jobId: string; expert?: string }) {
   return (
     <ApprenticeVoiceProvider>
-      <Panel expert={expert} />
+      <Panel jobId={jobId} expert={expert} />
     </ApprenticeVoiceProvider>
   );
 }
 
-function Panel({ expert }: { expert: string }) {
+function Panel({ jobId, expert }: { jobId: string; expert: string }) {
   const events = useSyncExternalStore(screenEvents.subscribe, screenEvents.all, noEvents);
   const [error, setError] = useState<string | null>(null);
   const [watching, setWatching] = useState(false);
@@ -29,12 +30,16 @@ function Panel({ expert }: { expert: string }) {
 
   useEffect(() => () => capture.current?.stop(), []);
 
+  const loop = useInterviewLoop({ agent, active: watching, jobId, expert, now: sessionT });
+
   async function start() {
     setError(null);
     try {
       capture.current = await startCapture({
         onResult: (r) => {
-          for (const event of r.events) {
+          for (const raw of r.events) {
+            // One clock for events and transcript: stamp with the session time it arrived.
+            const event = { ...raw, t: sessionT() };
             screenEvents.push(event);
             agentRef.current.sendContext({ kind: "screen_event", event });
           }
@@ -95,7 +100,21 @@ function Panel({ expert }: { expert: string }) {
             </button>
           )}
         </div>
-        <p className="mt-1 text-xs text-slate-500">{statusText}</p>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">{statusText}</p>
+          {watching && (
+            <span
+              title="Gate: opens after 1.5s of quiet on input, speech, and screen"
+              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                loop.gateOpen
+                  ? "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300"
+                  : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+              }`}
+            >
+              {loop.gateOpen ? "Quiet: may ask" : "Busy: holding questions"}
+            </span>
+          )}
+        </div>
         {(error || agent.error) && (
           <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
             {error || agent.error}
@@ -104,6 +123,29 @@ function Panel({ expert }: { expert: string }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {loop.asked.length > 0 && (
+          <section className="pb-6">
+            <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">
+              Questions asked · {loop.asked.length}
+            </p>
+            <ol className="space-y-2">
+              {[...loop.asked].reverse().map((q, i) => (
+                <li
+                  key={i}
+                  className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 text-sm text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200"
+                >
+                  {q.question}
+                  {q.is_guardrail && (
+                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                      guardrail
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
         <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Screen events</p>
         {events.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
@@ -115,6 +157,22 @@ function Panel({ expert }: { expert: string }) {
               .map((e, i) => <EventRow key={`${e.id}-${i}`} e={e} />)
               .reverse()}
           </ol>
+        )}
+
+        {loop.map && loop.map.rules.length > 0 && (
+          <section className="pt-6">
+            <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">
+              Learned rules · {loop.map.rules.length}
+            </p>
+            <ol className="space-y-2">
+              {loop.map.rules.map((r) => (
+                <li key={r.id} className="rounded-xl bg-teal-50/70 px-3 py-2.5 text-sm dark:bg-teal-500/10">
+                  <p className="font-medium text-teal-900 dark:text-teal-200">{r.text}</p>
+                  <p className="mt-1 text-xs italic text-slate-500">&ldquo;{r.reason_quote}&rdquo;</p>
+                </li>
+              ))}
+            </ol>
+          </section>
         )}
 
         {agent.transcript.length > 0 && (

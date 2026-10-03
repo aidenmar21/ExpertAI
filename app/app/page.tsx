@@ -15,7 +15,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         <FakeApp profile={profile} />
       </div>
       <div className="min-h-[24rem]">
-        <ApprenticePanel />
+        <ApprenticePanel jobId={id} />
       </div>
     </main>
   );

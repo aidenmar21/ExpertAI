@@ -17,7 +17,9 @@ function store<T>() {
     all: () => items,
     subscribe(fn: () => void) {
       subs.add(fn);
-      return () => subs.delete(fn);
+      return () => {
+        subs.delete(fn);
+      };
     },
   };
 }
