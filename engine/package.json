@@ -9,6 +9,7 @@
     "./server": "./server.ts"
   },
   "dependencies": {
-    "@understudy/shared": "*"
+    "@understudy/shared": "*",
+    "@understudy/brain": "*"
   }
 }

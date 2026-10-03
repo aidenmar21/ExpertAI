@@ -41,7 +41,7 @@ export interface GateResult { open: boolean; reason: string; }
 // engine: gate(signals: GateSignals): GateResult   (open after 1500ms quiet on all three)
 
 export interface QuestionPick { question: string; about_event_id: string; is_guardrail: boolean; }
-// engine (server): pickQuestion(recent: ScreenEvent[], map: WorkMap, policy: string): Promise<QuestionPick | null>
+// engine (server): pickQuestion(recent: ScreenEvent[], map: WorkMap, policy: string, transcript?: TranscriptLine[]): Promise<QuestionPick | null>
 
 export interface StuckSignals {
   msIdleWithRecordOpen: number;

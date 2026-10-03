@@ -1,11 +1,15 @@
 // Server-only engine entry. Import this from app API routes, never from the browser.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pickFromRecords } from "@understudy/brain";
 import type {
+  Condition,
   QuestionPick,
+  Rule,
   ScreenEvent,
   ScreenEventType,
   ScreenState,
+  TranscriptLine,
   Value,
   VisionRequest,
   VisionResponse,
@@ -22,13 +26,45 @@ const EVENT_TYPES: ReadonlySet<string> = new Set([
   "unknown_change",
 ]);
 
-/** Step 1 stub. Question picking lands after the gate is wired. */
+/**
+ * One question, or null to stay silent. Brain chooses the wording. A change a
+ * known rule already explains is not asked about again.
+ */
 export async function pickQuestion(
-  _recent: ScreenEvent[],
-  _map: WorkMap,
-  _policy: string,
+  recent: ScreenEvent[],
+  map: WorkMap,
+  policy: string,
+  transcript: TranscriptLine[] = [],
 ): Promise<QuestionPick | null> {
-  return null;
+  const pick = pickFromRecords(recent, transcript);
+  if (!pick || !pick.question.startsWith("Why")) return pick;
+  const event = recent.find((item) => item.id === pick.about_event_id);
+  if (event && ruleExplains(map.rules ?? [], event, policy)) return null;
+  return pick;
+}
+
+function ruleExplains(rules: Rule[], event: ScreenEvent, policy: string): boolean {
+  if (!event.field || event.to === undefined) return false;
+  if (typeof event.to === "string" && event.to.length >= 4 && policy.toLowerCase().includes(event.to.toLowerCase())) {
+    return true;
+  }
+  return rules.some((rule) => {
+    const must = rule.then.must?.[event.field!];
+    if (must !== undefined && valuesMatch(must, event.to)) return true;
+    return rule.when.some((cond) => cond.field === event.field && conditionMatches(cond, event.to));
+  });
+}
+
+function conditionMatches(cond: Condition, to: Value | undefined): boolean {
+  if (cond.op === "eq") return valuesMatch(cond.value as Value, to);
+  if (cond.op === "in" && Array.isArray(cond.value)) return cond.value.some((item) => valuesMatch(item, to));
+  return false;
+}
+
+function valuesMatch(a: Value | undefined, b: Value | undefined): boolean {
+  if (a == null || b == null) return a == b;
+  if (typeof a === "number" || typeof b === "number") return Number(a) === Number(b);
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 }
 
 /**
@@ -54,7 +90,10 @@ export async function analyzeFrame(req: VisionRequest): Promise<VisionResponse> 
       },
       body: JSON.stringify({
         model,
-        max_tokens: 4096,
+        max_tokens: 1024,
+        // Sonnet 5.5 thinks up front unless this is set. No tools, so this skips that block.
+        thinking: { type: "between_tools" },
+        output_config: { effort: "low" },
         system,
         messages: [
           {
@@ -284,6 +323,39 @@ async function runCheck(): Promise<void> {
     if (result.events.length !== 0 || result.screen_state.view !== "other") {
       throw new Error("analyzeFrame should return no events without a key and model");
     }
+  }
+  const changed: ScreenEvent = {
+    id: "e1",
+    t: 1000,
+    type: "field_changed",
+    field: "refund_method",
+    from: "Cash",
+    to: "Store credit",
+    record: "R-88104",
+    confidence: 0.95,
+    detail: "Refund to now shows Store credit",
+  };
+  const empty: WorkMap = { job_id: "returns-desk", expert: "Aarav", steps: [], rules: [], open_gaps: [] };
+  const asked = await pickQuestion([changed], empty, "Refunds go to the original payment method.", []);
+  if (!asked || !asked.question.startsWith("Why") || asked.about_event_id !== "e1") {
+    throw new Error(`pickQuestion should ask why, got ${JSON.stringify(asked)}`);
+  }
+  const known: WorkMap = {
+    ...empty,
+    rules: [{
+      id: "r1",
+      text: "No receipt means store credit",
+      type: "guardrail",
+      when: [],
+      then: { must: { refund_method: "Store credit" } },
+      reason_quote: "No receipt means store credit only",
+      screen_moment: { t: 1000, record: "R-88104" },
+      source: "live_question",
+      confirmed: true,
+    }],
+  };
+  if (await pickQuestion([changed], known, "", []) !== null) {
+    throw new Error("pickQuestion should stay silent when a rule already requires this value");
   }
   console.log("engine vision check ok");
 }

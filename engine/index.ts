@@ -43,10 +43,7 @@ export async function startCapture(opts: {
   const endpoint = opts.endpoint || "/api/vision";
   const intervalMs = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : 1500;
 
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: 2 },
-    audio: false,
-  });
+  const stream = await captureDisplay();
   const video = document.createElement("video");
   video.srcObject = stream;
   video.muted = true;
@@ -131,6 +128,31 @@ export async function startCapture(opts: {
   });
 
   return { stop };
+}
+
+async function captureDisplay(): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error("This browser can't share the screen. Open the page in Chrome or Safari, then click Start watching.");
+  }
+  const attempts: DisplayMediaStreamOptions[] = [
+    { video: { frameRate: 2 }, audio: false },
+    { video: true },
+  ];
+  let last: unknown;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getDisplayMedia(constraints);
+    } catch (err) {
+      last = err;
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        throw new Error("Screen share was cancelled. Click Start watching and choose a window or screen.");
+      }
+    }
+  }
+  if (last instanceof DOMException && last.name === "NotSupportedError") {
+    throw new Error("This browser can't share the screen. Open the page in Chrome or Safari, then click Start watching.");
+  }
+  throw last instanceof Error ? last : new Error("Could not start screen capture");
 }
 
 function sampleFrame(data: Uint8ClampedArray, width: number, height: number): Uint8Array {
