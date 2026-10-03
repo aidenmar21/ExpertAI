@@ -8,6 +8,7 @@ import {
   deliveryFor,
   detectRecordToggle,
   formatContext,
+  holdOutgoing,
   isAffirmative,
   isOwnContextEcho,
 } from "./format.ts";
@@ -56,39 +57,88 @@ test("only screen events are silent context", () => {
 test("ask now, stuck, off record", () => {
   assert.equal(
     formatContext({ kind: "ask_now", pick: { question: "Why cash?", about_event_id: "e1", is_guardrail: true } }),
-    "[ASK NOW] Why cash? (this is a guardrail question)",
+    "[ASK NOW] Why cash? (guardrail)",
   );
-  assert.equal(formatContext({ kind: "stuck", hint: "deciding between Cash and Store credit" }), "[STUCK] deciding between Cash and Store credit");
+  assert.equal(
+    formatContext({ kind: "stuck", hint: "deciding between Cash and Store credit" }),
+    "[STUCK] deciding between Cash and Store credit. Two sentences max, then wait.",
+  );
   assert.equal(formatContext({ kind: "off_record", on: true }), "[OFF RECORD]");
   assert.equal(formatContext({ kind: "off_record", on: false }), "[ON RECORD]");
 });
 
-test("debrief lists gaps, steps, rules", () => {
+test("debrief fallback lists gaps and asks for a story teach-back", () => {
   const text = formatContext({ kind: "start_debrief", gaps: [{ id: "g1", question: "When do you waive the receipt?" }], map });
   assert.match(text, /^\[DEBRIEF\]/);
   assert.match(text, /1\. When do you waive the receipt\?/);
-  assert.match(text, /1\. Open receipt: check date/);
-  assert.match(text, /Refunds over \$100 need a manager \(limit; Aarav said: "Anything over a hundred, I get Dana\."\)/);
+  assert.match(text, /story/);
   assert.match(text, /Is that right\?/);
+  assert.doesNotMatch(text, /Open receipt/, "steps are already in [WORK MAP]");
 });
 
 test("guardrail quotes the expert", () => {
   const text = formatContext({ kind: "guardrail_hit", check: { ok: false, rule, clip_id: "c1" } }, { expert: "Aarav" });
   assert.match(text, /^\[GUARDRAIL\]/);
-  assert.match(text, /Say only: "Aarav would stop here\. Why do you think\?" Then stop talking/);
+  assert.match(text, /Say only: "Aarav would stop here\. Why do you think\?" Then wait\./);
+  assert.match(text, /two sentences max/);
   assert.match(text, /Aarav said: "Anything over a hundred, I get Dana\."/);
   assert.match(text, /Escalate to: Shift manager/);
-  assert.match(text, /replay/);
+  assert.match(text, /Replay available/);
+});
+
+test("standard guardrail says it is the usual way, not the expert's rule", () => {
+  const text = formatContext({ kind: "guardrail_hit", check: { ok: false, standard: true, rule, explanation: "Most stores cap cash refunds." } }, { expert: "Aarav" });
+  assert.match(text, /Industry standard, no company rule yet/);
+  assert.match(text, /Most people in this job would stop here/);
+  assert.match(text, /not Aarav's rule/);
+  assert.doesNotMatch(text, /Replay/);
+});
+
+test("context lines stay short", () => {
+  const g = formatContext({ kind: "guardrail_hit", check: { ok: false, rule, clip_id: "c1" } }, { expert: "Aarav" });
+  assert.ok(g.split(/\s+/).length <= 60, `guardrail is ${g.split(/\s+/).length} words`);
+  assert.ok(formatContext({ kind: "stuck", hint: "Look up the sale by card" }).split(/\s+/).length <= 15);
 });
 
 test("transcript helpers", () => {
-  assert.equal(detectRecordToggle("ok let's go off the record for a sec"), true);
-  assert.equal(detectRecordToggle("alright, back on the record"), false);
-  assert.equal(detectRecordToggle("open the record for R-1"), null);
   assert.equal(isAffirmative("Yes, that's it"), true);
   assert.equal(isAffirmative("No, the limit is fifty"), false);
   assert.equal(asksForConfirmation("So you check the date first. Is that right?"), true);
   assert.equal(countHesitations("um, wait, I don't know, uh"), 4);
   assert.equal(isOwnContextEcho("[ASK NOW] why?"), true);
   assert.equal(isOwnContextEcho("why cash?"), false);
+});
+
+test("off the record phrases", () => {
+  for (const t of ["ok let's go off the record for a sec", "Don't record this, but", "do not record that", "pause recording", "Can you pause the recording?", "stop recording for a second"]) {
+    assert.equal(detectRecordToggle(t), true, t);
+  }
+});
+
+test("back on the record phrases", () => {
+  for (const t of ["alright, back on the record", "OK, on the record again", "resume", "Resume recording.", "let's resume", "okay resuming"]) {
+    assert.equal(detectRecordToggle(t), false, t);
+  }
+});
+
+test("not a record toggle", () => {
+  for (const t of ["open the record for R-1", "I'll resume the refund after lunch", "it's on my resume", "we record the serial number", "the recording studio"]) {
+    assert.equal(detectRecordToggle(t), null, t);
+  }
+});
+
+test("latest toggle in one utterance wins", () => {
+  assert.equal(detectRecordToggle("that was off the record, ok back on the record now"), false);
+  assert.equal(detectRecordToggle("we're on the record, but pause recording for this bit"), true);
+});
+
+test("screen events and questions are held off the record", () => {
+  const ev = { kind: "screen_event", event: { id: "e", t: 0, type: "field_changed", confidence: 1, detail: "" } } as const;
+  const ask = { kind: "ask_now", pick: { question: "Why?", about_event_id: "e", is_guardrail: false } } as const;
+  assert.deepEqual(holdOutgoing(ev, { offRecord: true, debrief: "idle" }), { outcome: "held", reason: "off the record" });
+  assert.deepEqual(holdOutgoing(ask, { offRecord: true, debrief: "idle" }), { outcome: "held", reason: "off the record" });
+  assert.equal(holdOutgoing(ev, { offRecord: false, debrief: "idle" }), null);
+  assert.equal(holdOutgoing({ kind: "off_record", on: false }, { offRecord: true, debrief: "idle" }), null, "going back on record is sent");
+  assert.equal(holdOutgoing({ kind: "stuck", hint: "h" }, { offRecord: true, debrief: "idle" }), null);
+  assert.deepEqual(holdOutgoing(ask, { offRecord: false, debrief: "asking" }), { outcome: "dropped", reason: "debrief in progress" });
 });

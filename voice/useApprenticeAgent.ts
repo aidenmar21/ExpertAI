@@ -13,6 +13,7 @@ import {
   deliveryFor,
   detectRecordToggle,
   formatContext,
+  holdOutgoing,
   isAffirmative,
   isOwnContextEcho,
 } from "./format";
@@ -355,14 +356,11 @@ export function useApprenticeAgent(mode: AgentMode, opts: ApprenticeAgentOptions
     const preview = () => formatContext(m, { expert: optsRef.current.expert });
 
     if (m.kind === "off_record") setOffRecordLocal(m.on);
-    // Off the record: the agent must not see what happens on screen.
-    if (m.kind === "screen_event" && offRecordRef.current) {
-      log(preview(), delivery, "held", "off the record");
-      return "held";
-    }
-    if (m.kind === "ask_now" && (debriefRef.current === "asking" || debriefRef.current === "teach_back")) {
-      log(preview(), delivery, "dropped", "debrief in progress");
-      return "dropped";
+    // Off the record: the agent must not see (or ask about) what happens on screen. ask_now is dropped during the debrief.
+    const hold = holdOutgoing(m, { offRecord: offRecordRef.current, debrief: debriefRef.current });
+    if (hold) {
+      log(preview(), delivery, hold.outcome, hold.reason);
+      return hold.outcome;
     }
     if (m.kind === "stuck") {
       const why = guardrailRef.current

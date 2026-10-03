@@ -37,7 +37,7 @@ No route yet? Make the agent public in the dashboard and pass `{ agentId: "agent
 |---|---|
 | `status`, `isAgentSpeaking`, `error` | panel UI |
 | `start()`, `stop()`, `reset()` | session control |
-| `sendContext(m)` | contract 8, returns `"sent" \| "queued" \| "dropped" \| "held" \| "throttled"`. `screen_event` = silent context; the rest make the agent speak. Screen events are held while off the record, `ask_now` is dropped during the debrief, `stuck` is throttled (30s cooldown, never during a guardrail or while the agent talks) |
+| `sendContext(m)` | contract 8, returns `"sent" \| "queued" \| "dropped" \| "held" \| "throttled"`. `screen_event` = silent context; the rest make the agent speak. Screen events and `ask_now` are held (never sent) while off the record, `ask_now` is dropped during the debrief, `stuck` is throttled (30s cooldown, never during a guardrail or while the agent talks) |
 | `say(text)` | type instead of talking; goes to the agent and the transcript as the human |
 | `transcript: VoiceTranscriptLine[]` | expert / new_hire / agent lines. `off_record: true` while off the record. Debrief lines carry `about_event_id` (proposed optional field on `TranscriptLine`) |
 | `outbox` | every message sent to the agent, with outcome |
@@ -67,7 +67,7 @@ Client tools (non-blocking), handled in the hook:
 - interviewer: `set_off_record` (boolean `on`) -> `offRecord`, `onOffRecordChange`; `confirm_teach_back` -> `debrief: "confirmed"`, `onTeachBackConfirmed`
 - tutor: `replay_expert_moment` -> `onReplayRequested(activeGuardrail)`; `flag_new_case` (string `summary`) -> `newCases`, `onNewCase`
 
-The hook also catches "off the record" and "yes" from the transcript, so it still works if a tool call is missed.
+The hook also catches record toggles and "yes" from the transcript, so it still works if a tool call is missed. Off: "off the record", "don't record this", "pause/stop recording". On: "back on the record", "on the record", "resume". The last phrase in an utterance wins.
 
 ## Dev
 
