@@ -1,7 +1,8 @@
 import type { CheckResult, Value, WorkMap } from "@understudy/shared";
-import { checkAction } from "@understudy/brain";
+import { canonicalField, checkAction } from "@understudy/brain";
 import { appendAudit, sessionFromHeaders } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/job";
+import { loadServerMap } from "@/lib/serverMaps";
 
 interface CheckBody { job_id?: string; action?: string; record?: Record<string, Value>; map?: WorkMap }
 
@@ -21,11 +22,15 @@ export async function POST(request: Request) {
   if (!listJobIds().includes(id) || typeof body.action !== "string" || !body.action) {
     return Response.json({ error: "expected { job_id, action, record, map? }" }, { status: 400 });
   }
-  const map = body.map;
+  // The caller's map wins; otherwise the job's latest map saved by /api/workmap (the extension has no browser copy).
+  const map = body.map && Array.isArray(body.map.rules) ? body.map : loadServerMap(id);
   if (!map || !Array.isArray(map.rules)) return Response.json({ ok: true } satisfies CheckResult);
 
-  const record = body.record && typeof body.record === "object" ? body.record : {};
   const job = loadJob(id);
+  // Field names from a third-party page are its labels (refund_to); map them onto the job's keys (refund_method).
+  const raw = body.record && typeof body.record === "object" ? body.record : {};
+  const record: Record<string, Value> = {};
+  for (const [k, v] of Object.entries(raw)) record[canonicalField(job, k) ?? k] = v;
   let check: CheckResult;
   try {
     check = checkAction({ action: body.action, record }, map, { job });

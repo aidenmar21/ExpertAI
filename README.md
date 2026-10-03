@@ -48,3 +48,11 @@ Run Claude in auto mode (Shift-Tab) so agents aren't stalled by permission promp
 **Security:** hub messages are injected into every agent's context. Only run it on a network you trust.
 
 MIT licensed.
+
+## ExpertAI Chrome extension
+
+`extension/` puts ExpertAI on top of any web app: it reads the page's form fields from the DOM (passwords and card
+numbers redacted), streams them to the audit log, and pauses a risky save with the expert's rule and quote before it
+goes through (fail-open if the server is down or slow). Load it with `chrome://extensions` → Developer mode →
+**Load unpacked** → `extension/`. It calls `POST /api/check { job_id, action, record } -> CheckResult` on the web app.
+Install steps, privacy rules and a 60-second demo: [extension/README.md](extension/README.md).

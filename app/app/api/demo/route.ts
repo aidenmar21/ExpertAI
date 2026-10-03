@@ -1,6 +1,7 @@
 import type { ScreenEvent, TranscriptLine } from "@understudy/shared";
 import { buildWorkMap, confirmWorkMap, seedWorkMap } from "@understudy/brain/server";
 import { listJobIds } from "@/lib/job";
+import { saveServerMap } from "@/lib/serverMaps";
 
 /**
  * POST { job_id } -> a confirmed Work Map built from a scripted expert session (demo fallback).
@@ -57,7 +58,9 @@ export async function POST(request: Request) {
       transcript: script.transcript,
       previous: seedWorkMap(jobId, SEEDED_EXPERT),
     });
-    return Response.json(confirmWorkMap(built));
+    const map = confirmWorkMap(built);
+    saveServerMap(jobId, map); // the extension checks against this copy
+    return Response.json(map);
   } catch (err) {
     console.error("[api/demo]", err);
     return Response.json({ error: "seeding the Work Map failed" }, { status: 500 });

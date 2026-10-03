@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ExpertAI</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">E</span>
+      <div>
+        <h1>ExpertAI</h1>
+        <p class="meta" id="page-line">Looking at this tab…</p>
+      </div>
+    </div>
+    <span class="pill neutral" id="conn" role="status">Checking…</span>
+  </header>
+
+  <main>
+    <section class="card" aria-labelledby="setup-title">
+      <h2 class="eyebrow" id="setup-title">This tab</h2>
+      <label class="label" for="job">Job</label>
+      <select id="job" class="field"><option value="">Loading jobs…</option></select>
+      <p class="help" id="job-help">Rules and pauses come from this job's Work Map.</p>
+
+      <fieldset class="segmented" aria-label="Who is working">
+        <legend class="label">Who is working</legend>
+        <label><input type="radio" name="mode" value="new_hire" /> <span>New hire</span></label>
+        <label><input type="radio" name="mode" value="expert" /> <span>Expert</span></label>
+      </fieldset>
+      <p class="help" id="mode-help"></p>
+
+      <div class="toggle-row">
+        <div>
+          <p class="label" id="watch-label">Watch this site</p>
+          <p class="help" id="site-line">Reads fields from the page itself. Off until you turn it on.</p>
+        </div>
+        <button type="button" role="switch" aria-checked="false" aria-labelledby="watch-label" id="watch" class="switch" disabled>
+          <span class="knob"></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="check-title">
+      <h2 class="eyebrow" id="check-title">Latest check</h2>
+      <div id="check" aria-live="polite"><p class="empty">No save attempted on this tab yet.</p></div>
+    </section>
+
+    <section class="card" aria-labelledby="events-title">
+      <div class="row-between">
+        <h2 class="eyebrow" id="events-title">Live events <span class="count" id="event-count"></span></h2>
+        <button type="button" class="btn tertiary compact" id="clear">Clear</button>
+      </div>
+      <ol class="events" id="events" aria-live="polite"></ol>
+      <p class="empty" id="events-empty">Turn on "Watch this site", then edit a field. Each change appears here as it happens.</p>
+    </section>
+
+    <section class="card" aria-labelledby="learn-title">
+      <h2 class="eyebrow" id="learn-title">Learn this page</h2>
+      <p class="body">Find the fields and buttons on this page, review them, then send them to the selected job's screen map.</p>
+      <button type="button" class="btn secondary" id="scan">Learn this page</button>
+      <div id="review" hidden>
+        <label class="label" for="record-type">Record type</label>
+        <input id="record-type" class="field" />
+        <h3 class="sub">Fields</h3>
+        <ul class="review-list" id="review-fields"></ul>
+        <h3 class="sub">Actions</h3>
+        <ul class="review-list" id="review-actions"></ul>
+        <div class="actions">
+          <button type="button" class="btn primary" id="send">Send to ExpertAI</button>
+          <button type="button" class="btn tertiary" id="cancel">Cancel</button>
+        </div>
+      </div>
+      <p class="help" id="learn-status" aria-live="polite"></p>
+    </section>
+
+    <details class="card settings">
+      <summary class="eyebrow">Settings</summary>
+      <label class="label" for="server">ExpertAI server</label>
+      <div class="inline">
+        <input id="server" class="field" inputmode="url" spellcheck="false" />
+        <button type="button" class="btn secondary" id="save-server">Save</button>
+      </div>
+      <p class="help">The web app's address. Default http://localhost:3000.</p>
+      <p class="help">Audit session: <code id="session">not started</code></p>
+    </details>
+  </main>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
