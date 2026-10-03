@@ -23,8 +23,10 @@ const OP_WORDS: Record<Condition["op"], string> = {
 export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName: string }) {
   const map = useWorkMap(jobId);
   const differs = differsFromStandard(map);
-  const company = map ? map.rules.filter((r) => r.source !== "baseline" || r.confirmed) : [];
+  // A baseline rule a company rule matched is shown once, as the company rule with a "matches the standard" badge.
+  const company = map ? map.rules.filter((r) => r.source !== "baseline" || (r.confirmed && !r.confirmed_by)) : [];
   const standard = map ? map.rules.filter((r) => r.source === "baseline" && !r.confirmed) : [];
+  const matchesStandard = new Set(map?.rules.filter((r) => r.source === "baseline" && r.confirmed_by).map((r) => r.confirmed_by) ?? []);
   const stats = useSyncExternalStore(sessionStats.subscribe, () => sessionStats.get(jobId), () => sessionStats.get(jobId));
   const gaps = stats.offRecord;
 
@@ -109,7 +111,7 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
               ) : (
                 <ul className="mt-4 space-y-4">
                   {company.map((r) => (
-                    <RuleCard key={r.id} rule={r} />
+                    <RuleCard key={r.id} rule={r} matchesStandard={matchesStandard.has(r.id)} />
                   ))}
                 </ul>
               )}
@@ -155,8 +157,9 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
   );
 }
 
-function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
+function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overriddenBy?: Rule; matchesStandard?: boolean }) {
   const baseline = rule.source === "baseline" && !rule.confirmed;
+  const overridden = baseline && !!rule.overridden_by;
   const then = [
     ...Object.entries(rule.then.must ?? {}).map(([k, v]) => `${k} must be ${v}`),
     ...Object.entries(rule.then.must_not ?? {}).map(([k, v]) => `${k} must not be ${v}`),
@@ -167,7 +170,7 @@ function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
     <li
       className={
         baseline
-          ? `rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 dark:border-slate-700 dark:bg-slate-900/40 ${overriddenBy ? "opacity-70" : ""}`
+          ? `rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 dark:border-slate-700 dark:bg-slate-900/40 ${overridden ? "opacity-70" : ""}`
           : "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
       }
     >
@@ -177,7 +180,7 @@ function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
         </span>
         {baseline && (
           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {overriddenBy ? "overridden at your company" : "industry standard · unconfirmed"}
+            {overridden ? "overridden at your company" : "industry standard · unconfirmed"}
           </span>
         )}
         {rule.source === "policy" && (
@@ -185,7 +188,7 @@ function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
             written
           </span>
         )}
-        {rule.source === "baseline" && rule.confirmed && (
+        {((rule.source === "baseline" && rule.confirmed) || matchesStandard) && (
           <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
             matches the standard
           </span>
@@ -200,9 +203,12 @@ function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
       <blockquote className={`mt-2 border-l-2 pl-3 text-sm italic ${baseline ? "border-slate-300 text-slate-500 dark:border-slate-600" : "border-sky-400 text-slate-600 dark:text-slate-300"}`}>
         &ldquo;{rule.reason_quote}&rdquo;
       </blockquote>
-      {overriddenBy && (
+      {overridden && (
         <p className="mt-2 text-xs text-slate-500">
-          Here instead: <span className="font-medium text-slate-700 dark:text-slate-200">{overriddenBy.text}</span>
+          Here instead:{" "}
+          <span className="font-medium text-slate-700 dark:text-slate-200">
+            {overriddenBy ? overriddenBy.text : rule.override_quote ? `“${rule.override_quote}”` : "the expert does it differently"}
+          </span>
         </p>
       )}
       <dl className="mt-3 grid gap-1 text-xs text-slate-500">

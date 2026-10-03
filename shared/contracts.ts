@@ -83,7 +83,9 @@ export interface Rule {
   // live_question/debrief/teach_back: the expert's spoken words. policy: parsed from written company text.
   // baseline: industry standard from knowledge/baseline-rules.json; only enforces once an expert confirms it.
   confirmed: boolean;           // true after teach-back (or the expert accepted a policy/baseline rule)
-  overridden_by?: string;       // baseline rule replaced by a company rule id ("At your company this differs")
+  overridden_by?: string;       // baseline rule replaced by a company rule id, or a decision record id ("At your company this differs")
+  override_quote?: string;      // the expert's words explaining why it differs here
+  confirmed_by?: string;        // baseline rule matched by a company rule id (the company rule is shown; this one is hidden)
 }
 
 export interface WorkMapStep {

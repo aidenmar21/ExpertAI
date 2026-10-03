@@ -191,7 +191,9 @@ const emptyMap = (job_id: string) => ({ job_id, expert: "Aarav", steps: [], rule
   assert.ok(!JSON.stringify(agentSafeJob(job)).includes("hidden_rules"));
   const sv = screenValues(job, "R-88102")!;
   assert.equal(sv.item, "Intro to Biology textbook + access code");
-  assert.ok(!("customer" in sv) && !("card" in sv), "PII fields stripped from model context");
+  // PII fields keep their presence (rules may test "card present") but never their value.
+  assert.ok(sv.customer === "[REDACTED]" && sv.card === "[REDACTED]", "PII values redacted from model context");
+  assert.ok(!JSON.stringify(sv).includes("Priya") && !JSON.stringify(sv).includes("0932"), "no PII value leaks");
   console.log(`ok workmap (no key): ${map.steps.length} steps, ${map.open_gaps.length} gaps`);
 
   // 7. Field names, scoring, redaction.

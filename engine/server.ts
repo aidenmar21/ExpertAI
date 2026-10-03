@@ -1,7 +1,7 @@
 // Server-only engine entry. Import this from app API routes, never from the browser.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { captureDecisions, checkAction, pickFromRecords } from "@understudy/brain";
+import { captureDecisions, checkAction, deriveFields, pickFromRecords } from "@understudy/brain";
 import type {
   Condition,
   JobProfile,
@@ -114,7 +114,7 @@ export async function pickQuestion(
 
 /** A baseline rule whose conditions hold on screen and whose outcome the expert's change breaks. */
 function contradictedRule(event: ScreenEvent, baseline: Rule[], opts: PickOptions): Rule | null {
-  const record: Record<string, Value> = { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null };
+  const record: Record<string, Value> = deriveFields(opts.job, { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null });
   const action = actionFor(event, opts.job);
   const probe = { action: action ?? "__field__", record };
   const res = checkAction(probe, { job_id: "", expert: "", steps: [], rules: baseline, open_gaps: [] }, {
@@ -129,7 +129,7 @@ function contradictedRule(event: ScreenEvent, baseline: Rule[], opts: PickOption
 
 /** A baseline rule the expert's change satisfies (same field, same required value). */
 function confirmedRule(event: ScreenEvent, baseline: Rule[], opts: PickOptions): Rule | null {
-  const record: Record<string, Value> = { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null };
+  const record: Record<string, Value> = deriveFields(opts.job, { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null });
   return baseline.find((r) =>
     r.when.length > 0 && r.when.every((c) => evalCond(c, record)) && r.then.must?.[event.field!] !== undefined &&
     valuesMatch(r.then.must[event.field!], event.to),

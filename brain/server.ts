@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type {
   JobProfile, Rule, ScreenEvent, TranscriptLine, Value, WorkMap, WorkMapStep,
 } from "@understudy/shared";
-import { canonicalEvents, emptyWorkMap, onRecordOnly, reconcileBaseline, redact, redactDeep, redactTranscript } from "./index";
+import { canonicalEvents, deriveFields, emptyWorkMap, onRecordOnly, overrideByDecisions, reconcileBaseline, redact, redactDeep, redactTranscript } from "./index";
 import { baselineRulesFor } from "./knowledge";
 export * from "./knowledge";
 import { score, runTutorCases, rulesLearned, type ScoreInput, type TutorCaseResult } from "./eval";
@@ -51,7 +51,10 @@ export function screenValues(job: JobProfile | null, recordId: string | undefine
   const pii = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
   const recs = (job.records as { expert?: Record<string, unknown>[]; new_hire?: Record<string, unknown>[] } | undefined) ?? {};
   const hit = [...(recs.expert ?? []), ...(recs.new_hire ?? [])].find((r) => Object.values(r).includes(recordId));
-  return hit ? Object.fromEntries(Object.entries(hit).filter(([k]) => !pii.has(k))) as Record<string, Value> : null;
+  // PII fields keep their presence, never their value: rules may test "card present", the model never sees the card.
+  return hit
+    ? (Object.fromEntries(Object.entries(hit).map(([k, v]) => [k, pii.has(k) ? (v == null || v === "" ? null : "[REDACTED]") : v])) as Record<string, Value>)
+    : null;
 }
 
 export function piiValues(job: JobProfile | null): string[] {
@@ -309,7 +312,15 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   // then each baseline rule is confirmed or overridden by the expert's own rules.
   const carried = (prev?.rules ?? []).filter((x) => x.source === "baseline" || x.source === "policy");
   const learned = [...kept, ...extractedNow.rules];
-  const rules = [...reconcileBaseline(carried, learned), ...learned];
+  const decisions = records.map((r) => {
+    const e = events.find((x) => x.id === r.sources.event_ids[0]);
+    return { id: r.id, record: r.record, why: r.why, quotes: r.quotes, event: { field: e?.field, to: e?.to } };
+  });
+  const baselineRules = overrideByDecisions(reconcileBaseline(carried, learned), decisions, (rec) => {
+    const v = screenValues(job, rec);
+    return v ? deriveFields(job, v) : null;
+  });
+  const rules = [...baselineRules, ...learned];
   const rule_sources: Record<string, RuleEvidence> = {};
   for (const x of kept) rule_sources[x.id] = prevEvidence[x.id];
   Object.assign(rule_sources, extractedNow.evidence);

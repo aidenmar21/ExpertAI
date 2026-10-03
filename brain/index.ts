@@ -58,9 +58,33 @@ export interface CheckOptions {
   baselineFallback?: boolean;     // default true: unconfirmed baseline rules speak when no company rule covers the case
 }
 
+/**
+ * Fields a rule may refer to that the screen shows only indirectly, computed generically from the job:
+ * days_since_<x> / days_to_<x> for every <x>_date field (vs the job's business_date), and
+ * payment_method = "card" when a non-empty card field is shown. Never overrides a field the screen has.
+ */
+export function deriveFields(job: JobProfile | null | undefined, rec: Rec): Rec {
+  const out: Rec = { ...rec };
+  const today = job ? Date.parse(job.job.business_date) : NaN;
+  for (const [k, v] of Object.entries(rec)) {
+    const m = /^(.+)_date$/.exec(k);
+    if (!m || typeof v !== "string" || !v || Number.isNaN(today)) continue;
+    const d = Date.parse(v);
+    if (Number.isNaN(d)) continue;
+    const days = Math.round((today - d) / 86_400_000);
+    if (out[`days_since_${m[1]}`] === undefined) out[`days_since_${m[1]}`] = days;
+    if (out[`days_to_${m[1]}`] === undefined) out[`days_to_${m[1]}`] = -days;
+  }
+  if (out.payment_method === undefined && "card" in rec) {
+    out.payment_method = rec.card != null && String(rec.card).trim() !== "" ? "card" : null;
+  }
+  return out;
+}
+
 export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions = {}): CheckResult {
   if (SAFE_ACTIONS.has(a.action)) return { ok: true };
   const sets = opts.job?.screen.actions.find((x) => x.key === a.action)?.sets ?? {};
+  a = { ...a, record: deriveFields(opts.job, a.record) };
   const after: Rec = { ...a.record, ...sets };
   // Company rules first (anything confirmed, including baseline rules the expert matched). If no company rule
   // covers the case at all, an unconfirmed baseline rule may speak as "the industry standard".
@@ -111,11 +135,36 @@ export function reconcileBaseline(carried: Rule[], learned: Rule[]): Rule[] {
     if (!match) return b;
     if (sameOutcome(b, match) || (!!b.then.escalate_to && b.then.escalate_to === match.then.escalate_to)) {
       return {
-        ...b, confirmed: true, overridden_by: undefined,
+        ...b, confirmed: true, overridden_by: undefined, override_quote: undefined, confirmed_by: match.id,
         reason_quote: match.reason_quote, clip_id: match.clip_id, screen_moment: match.screen_moment,
       };
     }
-    return { ...b, confirmed: false, overridden_by: match.id };
+    return { ...b, confirmed: false, confirmed_by: undefined, overridden_by: match.id, override_quote: match.reason_quote };
+  });
+}
+
+/**
+ * The expert went against a baseline rule and explained why, but the explanation did not yield a checkable rule
+ * (e.g. a permission: "we do refund cash here"). The baseline rule is still overridden at this company.
+ */
+export function overrideByDecisions(
+  carried: Rule[],
+  decisions: { id: string; record?: string; why: string | null; quotes: string[]; event: { field?: string; to?: Value } }[],
+  valuesFor: (recordId: string | undefined) => Rec | null,
+): Rule[] {
+  return carried.map((b) => {
+    if (b.source !== "baseline" || b.confirmed || b.overridden_by) return b;
+    for (const d of decisions) {
+      if (d.why === null || !d.event.field) continue;
+      const rec: Rec = { ...(valuesFor(d.record) ?? {}), [d.event.field]: d.event.to ?? null };
+      if (b.when.length === 0 || !b.when.every((c) => evalCondition(c, rec))) continue;
+      const must = b.then.must?.[d.event.field];
+      const mustNot = b.then.must_not?.[d.event.field];
+      const broke = (must !== undefined && String(must).toLowerCase() !== String(d.event.to ?? "").toLowerCase())
+        || (mustNot !== undefined && String(mustNot).toLowerCase() === String(d.event.to ?? "").toLowerCase());
+      if (broke) return { ...b, overridden_by: d.id, override_quote: d.quotes[0] ?? d.why ?? undefined };
+    }
+    return b;
   });
 }
 function normThen(t: Rule["then"]) {
