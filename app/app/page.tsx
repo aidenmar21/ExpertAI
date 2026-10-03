@@ -15,7 +15,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         <FakeApp profile={profile} />
       </div>
       <div className="min-h-[24rem]">
-        <ApprenticePanel jobId={id} />
+        <ApprenticePanel jobId={id} escalateTo={profile.job.escalate_to} />
       </div>
     </main>
   );

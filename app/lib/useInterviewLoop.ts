@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { QuestionPick, WorkMap } from "@understudy/shared";
 import { gate } from "@understudy/engine";
 import type { ApprenticeAgent } from "@understudy/voice";
 import { screenEvents } from "@/lib/session";
+import { rebuildWorkMap, workMaps } from "@/lib/workmap";
 
 const TICK_MS = 250;
 const RECENT_EVENTS = 20;
@@ -19,6 +20,7 @@ export interface AskedQuestion extends QuestionPick { t: number; }
  */
 export function useInterviewLoop(opts: {
   agent: ApprenticeAgent;
+  /** Asking live questions (capture running, not in the debrief). */
   active: boolean;
   jobId: string;
   expert: string;
@@ -27,7 +29,7 @@ export function useInterviewLoop(opts: {
   const { agent, active, jobId, expert, now } = opts;
   const [gateOpen, setGateOpen] = useState(false);
   const [asked, setAsked] = useState<AskedQuestion[]>([]);
-  const [map, setMap] = useState<WorkMap | null>(null);
+  const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
 
   const agentRef = useRef(agent);
   const mapRef = useRef<WorkMap | null>(null);
@@ -66,30 +68,18 @@ export function useInterviewLoop(opts: {
     if (lastLine?.speaker === "expert") dirty.current = true;
   }, [lastLine]);
 
-  // Rebuild the Work Map from the full history shortly after the expert speaks.
+  // Rebuild the Work Map from the full history shortly after the expert speaks
+  // (live answers, debrief answers, and teach-back corrections alike).
   const expertLines = agent.transcript.filter((l) => l.speaker === "expert").length;
   useEffect(() => {
-    if (!active || expertLines === 0) return;
-    const id = setTimeout(async () => {
-      try {
-        const res = await fetch("/api/workmap", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            job_id: jobId,
-            expert,
-            events: screenEvents.all(),
-            transcript: agentRef.current.transcript,
-            previous: mapRef.current ?? undefined,
-          }),
-        });
-        if (res.ok) setMap((await res.json()) as WorkMap);
-      } catch {
-        /* keep the last map */
-      }
+    if (expertLines === 0) return;
+    const id = setTimeout(() => {
+      rebuildWorkMap({ jobId, expert, events: screenEvents.all(), transcript: agentRef.current.transcript }).catch(
+        () => undefined, // keep the last map
+      );
     }, WORKMAP_DEBOUNCE_MS);
     return () => clearTimeout(id);
-  }, [active, expertLines, jobId, expert]);
+  }, [expertLines, jobId, expert]);
 
   useEffect(() => {
     if (!active) return;
@@ -135,5 +125,7 @@ export function useInterviewLoop(opts: {
     return () => clearInterval(id);
   }, [active, jobId, expert, now]);
 
-  return { gateOpen, asked, map };
+  return { gateOpen, asked };
 }
+
+const noMap = (): WorkMap | null => null;
