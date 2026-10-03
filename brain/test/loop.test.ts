@@ -5,7 +5,7 @@ import type { Rule, ScreenEvent, TranscriptLine } from "@understudy/shared";
 import {
   captureDecisions, pickFromRecords, checkAction, nextQuestionKind, questionFor, workMapToAgentText, redact,
 } from "../index";
-import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, groundRules, type LlmRule } from "../server";
+import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, groundRules, screenValues, type LlmRule } from "../server";
 
 const ev = (id: string, t: number, record: string | undefined, field: string, from: string | null, to: string | null, type: ScreenEvent["type"] = "field_changed"): ScreenEvent =>
   ({ id, t, type, record, field, from, to, confidence: 0.9, detail: `${field} ${from} -> ${to}` });
@@ -75,6 +75,9 @@ const transcript: TranscriptLine[] = [
   const job = loadJob("returns-desk")!;
   assert.ok(job, "job loads");
   assert.ok(!JSON.stringify(agentSafeJob(job)).includes("hidden_rules"));
+  const sv = screenValues(job, "R-88102")!;
+  assert.equal(sv.item, "Intro to Biology textbook + access code");
+  assert.ok(!("customer" in sv) && !("card" in sv), "PII fields stripped from LLM context");
   const map = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript });
   assert.equal(map.steps.length, 4);
   assert.equal(map.open_gaps.length, 2);

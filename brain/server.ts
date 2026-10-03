@@ -36,6 +36,15 @@ export function agentSafeJob(job: JobProfile) {
   return { job: job.job, screen: job.screen };
 }
 
+// On-screen values of the case a record is about (from the job's fake records), PII fields removed.
+export function screenValues(job: JobProfile | null, recordId: string | undefined): Record<string, unknown> | null {
+  if (!job || !recordId) return null;
+  const pii = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
+  const recs = (job.records as { expert?: Record<string, unknown>[]; new_hire?: Record<string, unknown>[] } | undefined) ?? {};
+  const hit = [...(recs.expert ?? []), ...(recs.new_hire ?? [])].find((r) => Object.values(r).includes(recordId));
+  return hit ? Object.fromEntries(Object.entries(hit).filter(([k]) => !pii.has(k))) : null;
+}
+
 function piiValues(job: JobProfile | null): string[] {
   if (!job) return [];
   const keys = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
@@ -106,6 +115,7 @@ Strict grounding:
 - Conditions use only the listed screen field keys; actions use only the listed action keys.
 - A rule with no conditions applies to every case, so only emit when=[] if the expert said "always".
 - Use op "missing" for "no receipt"-style statements, numeric ops for amount limits.
+- Scope: each record has screen_values (what was on screen for that case). Include a condition on every field the expert's reason depends on, so the rule does NOT fire on cases where the reason doesn't apply. Example: "opened access codes are never refundable" needs condition=Opened AND the item field identifying the access-code product, not condition alone. If the distinguishing value can only be named exactly, use eq or in with the exact on-screen value(s).
 Return {"rules": []} if nothing is grounded.`;
 
 function norm(s: string): string {
@@ -158,7 +168,7 @@ export async function extractRules(records: DecisionRecord[], job: JobProfile | 
   const payload = {
     job: job ? agentSafeJob(job) : null,
     records: grounded.map((r) => ({
-      record_id: r.id, record: r.record, what: r.what, how: r.how, why: r.why,
+      record_id: r.id, record: r.record, screen_values: screenValues(job, r.record), what: r.what, how: r.how, why: r.why,
       exceptions: r.exceptions, guardrails: r.guardrails, escalate_to: r.escalate_to ?? null, quotes: r.quotes,
     })),
   };
