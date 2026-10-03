@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import type { Rule, ScreenEvent, TranscriptLine } from "@understudy/shared";
 import {
-  captureDecisions, checkAction, nextQuestionKind, questionFor, workMapToAgentText, redact,
+  captureDecisions, pickFromRecords, checkAction, nextQuestionKind, questionFor, workMapToAgentText, redact,
 } from "../index";
 import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, groundRules, type LlmRule } from "../server";
 
@@ -57,6 +57,18 @@ const transcript: TranscriptLine[] = [
   assert.equal(nextQuestionKind(x3), "what_would_change");
   assert.equal(nextQuestionKind({ ...x3, asked: ["why", "what_would_change", "when_to_stop"] }), null, "no repeats");
   assert.equal(questionFor(x4, "why"), "Why did you change refund_method from Cash to Original card on R-88104?");
+  // Picker: unexplained first, then follow-ups on the latest, silent when off record or nothing fresh.
+  const evX4 = events.slice(0, 4), tX4 = transcript.slice(0, 10);   // up to the vague X4 answer
+  assert.equal(pickFromRecords(evX4, tX4, { now: 106_000 }), null, "vague why not re-asked; X4 not explained -> no follow-up");
+  const p1 = pickFromRecords(evX4.slice(0, 2), [], { now: 21_000 })!;
+  assert.equal(p1.about_event_id, "e1"); assert.match(p1.question, /^Why did you change status from Open to Denied on R-88102/);
+  const p2 = pickFromRecords(evX4.slice(0, 2), transcript.slice(0, 2), { now: 27_000 })!;
+  assert.equal(p2.about_event_id, "e1"); assert.match(p2.question, /decide differently/);
+  const p3 = pickFromRecords(evX4.slice(0, 2), transcript.slice(0, 4), { now: 33_000 })!;
+  assert.ok(p3.is_guardrail && /stop and ask/.test(p3.question));
+  assert.equal(pickFromRecords(events, transcript, { now: 152_000 }), null, "off the record -> silent");
+  assert.equal(pickFromRecords(evX4.slice(0, 1), [], { now: 200_000 }), null, "stale -> silent");
+  console.log("ok picker:", p1.question, "|", p2.question, "|", p3.question);
   console.log("ok questions:", questionFor(byEv("e0")!, "why"));
 
   // 3. Work Map: steps, gaps for unknowns, no hidden_rules leak.

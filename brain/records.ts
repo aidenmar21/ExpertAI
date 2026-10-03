@@ -1,7 +1,7 @@
 // Decision records: the expert's actual answers, tied to the screen moment they explain.
 // Browser-safe and deterministic. The LLM step in server.ts only refines these into Rules.
 import type {
-  OpenGap, ScreenEvent, ScreenMoment, TranscriptLine, Value, WorkMap,
+  OpenGap, QuestionPick, ScreenEvent, ScreenMoment, TranscriptLine, Value, WorkMap,
 } from "@understudy/shared";
 import { redact } from "./index";
 
@@ -224,4 +224,37 @@ export function workMapToAgentText(map: WorkMap & { records?: DecisionRecord[] }
   }
   if (map.open_gaps.length) lines.push(`Not yet explained: ${map.open_gaps.map((g) => g.question).join(" | ")}`);
   return lines.join("\n");
+}
+
+// ---------- Question picker (for engine.pickQuestion) ----------
+export interface PickOptions {
+  now?: number;                 // ms since session start; defaults to the latest event/line
+  maxAgeMs?: number;            // only ask about recent decisions (default 60s)
+  followUps?: boolean;          // after "why", ask what would change it / when to stop (default true)
+  piiNames?: string[];
+}
+
+// One grounded question, or null to stay silent.
+// Follow-ups on the latest decision first (once explained), then the most recent unexplained decision.
+// Never repeats a question kind on a record, and never re-asks after a vague answer (that goes to the debrief).
+export function pickFromRecords(events: ScreenEvent[], transcript: TranscriptLine[], opts: PickOptions = {}): QuestionPick | null {
+  const { events: evs, transcript: lines } = onRecordOnly(events, transcript);
+  if (lines.length && transcript[transcript.length - 1]?.off_record) return null;   // currently off the record
+  const recs = captureDecisions({ events: evs, transcript: lines, piiNames: opts.piiNames });
+  if (!recs.length) return null;
+  const now = opts.now ?? Math.max(...evs.map((e) => e.t), ...lines.map((l) => l.t), 0);
+  const fresh = recs.filter((r) => now - r.sources.screen_moment.t <= (opts.maxAgeMs ?? 60_000));
+  const latest = fresh[fresh.length - 1];
+  if (!latest) return null;
+
+  const pick = (r: DecisionRecord, kind: QuestionKind): QuestionPick =>
+    ({ question: questionFor(r, kind), about_event_id: r.sources.event_ids[0], is_guardrail: kind === "when_to_stop" });
+
+  // Stay on the decision being discussed: follow up on the latest one once it's explained.
+  if (opts.followUps !== false && latest.why !== null) {
+    const k = nextQuestionKind(latest);
+    if (k) return pick(latest, k);
+  }
+  const unexplained = [...fresh].reverse().find((r) => r.why === null && !r.asked.includes("why"));
+  return unexplained ? pick(unexplained, "why") : null;
 }

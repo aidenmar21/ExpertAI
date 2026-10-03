@@ -5,6 +5,7 @@ Owner: aiden. Turns what the expert did and said into decision records, a Work M
 ## `@understudy/brain` (browser-safe)
 - `checkAction(a: ProposedAction, map: WorkMap): CheckResult`: tutor check before save; handoff actions (`call_manager`, `hold`, `send_to_controller`, `request_info`) always pass.
 - `captureDecisions({events, transcript, piiNames?, escalateTo?}): DecisionRecord[]`: pairs each agent question with the expert's answer and the screen event it is about. Off-record lines and events in off-record windows are dropped. PII is redacted. Vague answers ("I don't know") leave `why: null`.
+- `pickFromRecords(events, transcript, {now?, maxAgeMs?=60000, followUps?=true}): QuestionPick | null`: for engine.pickQuestion. It follows up on the latest explained decision first, then asks why about the newest unexplained one. It never repeats a question or re-asks after a vague answer, and it stays silent when off the record or when nothing is recent.
 - `questionFor(record, kind)`, `nextQuestionKind(record)`: grounded questions in the order why, then what would change it, then when to stop. Never repeats a kind.
 - `recordsToGaps`, `confirmRecords`, `correctRecord`, `workMapToAgentText(map)` (agent context text, never includes hidden_rules).
 - `redact(text, names?)`, `redactRecord(rec, job)`, `score(...)`, `evalCondition`, `onRecordOnly`, `emptyWorkMap`.
