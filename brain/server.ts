@@ -3,10 +3,18 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
-  JobProfile, Rule, RuleType, ScreenEvent, TranscriptLine, WorkMap, WorkMapStep,
+  JobProfile, Rule, ScreenEvent, TranscriptLine, Value, WorkMap, WorkMapStep,
 } from "@understudy/shared";
-import { canonicalEvents, emptyWorkMap } from "./index";
-import { captureDecisions, recordsToGaps, type DecisionRecord } from "./records";
+import { canonicalEvents, emptyWorkMap, onRecordOnly } from "./index";
+import {
+  applyCorrections, captureDecisions, recordsToGaps, type DecisionRecord, type WorkMapWithRecords,
+} from "./records";
+import {
+  OPS, RULE_TYPES, expertCases, validateCandidates,
+  type Rejection, type RuleCandidate, type RuleEvidence,
+} from "./validate";
+
+export type { WorkMapWithRecords } from "./records";
 
 export interface BuildWorkMapInput {
   job_id: string;
@@ -15,9 +23,6 @@ export interface BuildWorkMapInput {
   transcript: TranscriptLine[];
   previous?: WorkMap;
 }
-
-// WorkMap plus the decision records it was built from. Extra field is structurally compatible with WorkMap.
-export type WorkMapWithRecords = WorkMap & { records: DecisionRecord[] };
 
 // ---------- Job profile (agent-safe view) ----------
 const JOB_DIRS = [join(process.cwd(), "shared/jobs"), join(process.cwd(), "../shared/jobs")];
@@ -37,12 +42,12 @@ export function agentSafeJob(job: JobProfile) {
 }
 
 // On-screen values of the case a record is about (from the job's fake records), PII fields removed.
-export function screenValues(job: JobProfile | null, recordId: string | undefined): Record<string, unknown> | null {
+export function screenValues(job: JobProfile | null, recordId: string | undefined): Record<string, Value> | null {
   if (!job || !recordId) return null;
   const pii = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
   const recs = (job.records as { expert?: Record<string, unknown>[]; new_hire?: Record<string, unknown>[] } | undefined) ?? {};
   const hit = [...(recs.expert ?? []), ...(recs.new_hire ?? [])].find((r) => Object.values(r).includes(recordId));
-  return hit ? Object.fromEntries(Object.entries(hit).filter(([k]) => !pii.has(k))) : null;
+  return hit ? Object.fromEntries(Object.entries(hit).filter(([k]) => !pii.has(k))) as Record<string, Value> : null;
 }
 
 function piiValues(job: JobProfile | null): string[] {
@@ -55,10 +60,9 @@ function piiValues(job: JobProfile | null): string[] {
   return [...out];
 }
 
-// ---------- LLM refinement: records -> Rules ----------
-const RULE_TYPES: RuleType[] = ["judgment", "guardrail", "exception", "limit", "stop_and_ask"];
-const OPS = ["eq", "neq", "gt", "gte", "lt", "lte", "in", "missing", "present"];
+// ---------- Model extraction: records -> candidate rules -> validated Rules ----------
 const SCALAR = { type: ["string", "number", "null"] };
+const PAIR = { type: "object", properties: { field: { type: "string" }, value: SCALAR }, required: ["field", "value"], additionalProperties: false };
 
 const RULES_SCHEMA = {
   type: "object",
@@ -84,8 +88,8 @@ const RULES_SCHEMA = {
               additionalProperties: false,
             },
           },
-          must: { type: "array", items: { type: "object", properties: { field: { type: "string" }, value: SCALAR }, required: ["field", "value"], additionalProperties: false } },
-          must_not: { type: "array", items: { type: "object", properties: { field: { type: "string" }, value: SCALAR }, required: ["field", "value"], additionalProperties: false } },
+          must: { type: "array", items: PAIR },
+          must_not: { type: "array", items: PAIR },
           must_not_action: { type: "array", items: { type: "string" } },
           escalate_to: { type: ["string", "null"] },
           reason_quote: { type: "string" },
@@ -99,141 +103,155 @@ const RULES_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export type LlmRule = {
-  record_id: string; text: string; type: RuleType;
-  when: { field: string; op: string; value: unknown }[];
-  must: { field: string; value: string | number | null }[];
-  must_not: { field: string; value: string | number | null }[];
-  must_not_action: string[]; escalate_to: string | null; reason_quote: string;
-};
-
 const SYSTEM = `You turn an expert's spoken explanations into checkable work rules.
 Strict grounding:
 - Use ONLY what the expert said in the decision records' quotes. Never add rules from general knowledge or the written policy alone.
 - reason_quote must be copied verbatim (a contiguous substring) from one of that record's quotes.
 - If a record's why is null, produce no rule for it.
-- Conditions use only the listed screen field keys; actions use only the listed action keys.
-- A rule with no conditions applies to every case, so only emit when=[] if the expert said "always".
-- Use op "missing" for "no receipt"-style statements, numeric ops for amount limits.
+- Conditions use only the listed screen field keys; actions use only the listed action keys; select values only from the field's options.
+- A rule with no conditions applies to every case, so only emit when=[] if the expert said "always" or "never".
+- Use op "missing" for "no receipt"-style statements, numeric ops with a plain number for amount limits.
 - Scope conditions to the quote, not the case. Add a condition only for something the expert's words state or directly imply ("over a hundred dollars" -> price gt 100; "no receipt" -> receipt_no missing). Never copy other facts of the case the expert happened to be on: a general statement made during a no-receipt case is still general.
 - screen_values shows what was on screen for that case. Use it only to find the exact field and value for something the expert named (e.g. "access codes" -> item eq the on-screen access-code product). Use eq or in with the exact on-screen value(s).
+- Outcomes: must / must_not are field values after the action; must_not_action lists actions to block; escalate_to blocks every action except handing off. Prefer must_not_action when the expert only restricts some actions (e.g. "I call the manager before refunding" -> must_not_action [refund], escalate_to manager).
 - When one answer states several independent rules, emit them as separate rules.
 Return {"rules": []} if nothing is grounded.`;
 
-function norm(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9$€.]+/g, " ").trim();
+export interface ExtractResult {
+  rules: Rule[];
+  evidence: Record<string, RuleEvidence>;
+  rejected: Rejection[];
+  model?: string;
+  calls: number;
+  ok: boolean;          // the model answered and its output was validated (false = retry on next build)
 }
 
-function toRule(l: LlmRule, rec: DecisionRecord, job: JobProfile | null, i: number): Rule | null {
-  const quotes = rec.quotes.map(norm).join(" | ");
-  if (!l.reason_quote || !quotes.includes(norm(l.reason_quote))) return null; // not the expert's words
-  const fields = new Set(job?.screen.fields.map((f) => f.key) ?? []);
-  const actions = new Set(job?.screen.actions.map((a) => a.key) ?? []);
-  if (job && l.when.some((c) => !fields.has(c.field))) return null;
-  const kv = (xs: { field: string; value: string | number | null }[]) =>
-    xs.length ? Object.fromEntries(xs.filter((x) => !job || fields.has(x.field)).map((x) => [x.field, x.value])) : undefined;
-  const then: Rule["then"] = {
-    must: kv(l.must), must_not: kv(l.must_not),
-    must_not_action: l.must_not_action.filter((a) => !job || actions.has(a)),
-    escalate_to: l.escalate_to ?? undefined,
-  };
-  if (!then.must_not_action?.length) delete then.must_not_action;
-  if (!then.must && !then.must_not && !then.must_not_action && !then.escalate_to) return null; // not checkable
-  return {
-    id: `rule-${rec.id}-${i}`,
-    text: l.text,
-    type: RULE_TYPES.includes(l.type) ? l.type : "judgment",
-    when: l.when.map((c) => ({ field: c.field, op: c.op as Rule["when"][number]["op"], value: c.value as Rule["when"][number]["value"] })),
-    then,
-    reason_quote: l.reason_quote,
-    screen_moment: rec.sources.screen_moment,
-    clip_id: rec.sources.clip_id,
-    source: "live_question",
-    confirmed: rec.status === "confirmed",
-  };
-}
-
-// Keeps only rules whose quote is the expert's own words and whose fields/actions exist on screen.
-export function groundRules(llm: LlmRule[], records: DecisionRecord[], job: JobProfile | null): Rule[] {
-  const byId = new Map(records.map((r) => [r.id, r]));
-  return llm.flatMap((l, i) => {
-    const rec = byId.get(l.record_id);
-    const rule = rec && rec.why !== null ? toRule(l, rec, job, i) : null;
-    return rule ? [rule] : [];
+async function callModel(client: Anthropic, model: string, user: unknown): Promise<RuleCandidate[] | null> {
+  const res = await client.messages.create({
+    model,
+    max_tokens: 16000,
+    output_config: { effort: "medium", format: { type: "json_schema", schema: RULES_SCHEMA } },
+    system: SYSTEM,
+    messages: [{ role: "user", content: JSON.stringify(user) }],
   });
+  if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") {
+    console.error(`[brain] rule extraction stopped: ${res.stop_reason}`);
+    return null;
+  }
+  const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+  return (JSON.parse(text) as { rules: RuleCandidate[] }).rules;
 }
 
-export async function extractRules(records: DecisionRecord[], job: JobProfile | null): Promise<Rule[]> {
+// Asks the model for rules, validates every one, and gives rejected rules one repair round.
+export async function extractRules(records: DecisionRecord[], job: JobProfile, cases: ReturnType<typeof expertCases> = []): Promise<ExtractResult> {
   const grounded = records.filter((r) => r.why !== null);
-  if (!grounded.length || !process.env.ANTHROPIC_API_KEY) return [];
+  const empty: ExtractResult = { rules: [], evidence: {}, rejected: [], calls: 0, ok: false };
+  if (!grounded.length || !process.env.ANTHROPIC_API_KEY) return empty;
   const client = new Anthropic();
+  const model = process.env.LLM_MODEL || "claude-opus-5-5";
   const payload = {
-    job: job ? agentSafeJob(job) : null,
+    job: agentSafeJob(job),
     records: grounded.map((r) => ({
       record_id: r.id, record: r.record, screen_values: screenValues(job, r.record), what: r.what, how: r.how, why: r.why,
       exceptions: r.exceptions, guardrails: r.guardrails, escalate_to: r.escalate_to ?? null, quotes: r.quotes,
     })),
   };
   try {
-    const res = await client.messages.create({
-      model: process.env.LLM_MODEL || "claude-opus-5-5",
-      max_tokens: 16000,
-      output_config: { effort: "medium", format: { type: "json_schema", schema: RULES_SCHEMA } },
-      system: SYSTEM,
-      messages: [{ role: "user", content: JSON.stringify(payload) }],
+    const first = await callModel(client, model, payload);
+    if (!first) return { ...empty, model, calls: 1 };
+    const v1 = validateCandidates(first, { job, records, cases });
+    if (!v1.rejected.length) return { ...v1, model, calls: 1, ok: true };
+
+    // One repair round: show the model exactly why each rule failed. It may fix or drop them.
+    const repair = await callModel(client, model, {
+      ...payload,
+      repair: "These rules failed validation. Return corrected versions of them, or omit any that cannot be grounded and scoped correctly. Return only rules for the listed failures.",
+      rejected: v1.rejected.map((r) => ({ rule: r.candidate, reason: r.reason })),
     });
-    if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return [];
-    const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-    return groundRules((JSON.parse(text) as { rules: LlmRule[] }).rules, records, job);
+    const v2 = validateCandidates(repair ?? [], { job, records, cases });
+    const rules = [...v1.rules, ...v2.rules.filter((r) => !v1.rules.some((x) => x.id === r.id))];
+    return {
+      rules,
+      evidence: { ...v1.evidence, ...v2.evidence },
+      rejected: [...v1.rejected.map((r) => ({ ...r, reason: `${r.reason} (sent for repair)` })), ...v2.rejected],
+      model, calls: 2, ok: true,
+    };
   } catch (err) {
     if (err instanceof Anthropic.APIError) console.error(`[brain] rule extraction failed: ${err.status} ${err.message}`);
     else console.error("[brain] rule extraction failed:", err);
-    return [];   // Work Map still has records + gaps; rules arrive on the next build
+    return { ...empty, model, calls: 1 };   // Work Map still has records + gaps; rules arrive on the next build
   }
 }
 
 // ---------- buildWorkMap ----------
-function stepsFrom(records: DecisionRecord[], rules: Rule[]): WorkMapStep[] {
+function stepsFrom(records: DecisionRecord[], rules: Rule[], evidence: Record<string, RuleEvidence>): WorkMapStep[] {
   return records.map((r, i) => ({
     n: i + 1,
     title: r.what,
     screen_moment: r.sources.screen_moment,
     decision: r.how ?? r.what,
-    rule_ids: rules.filter((x) => x.id.startsWith(`rule-${r.id}-`)).map((x) => x.id),
+    rule_ids: rules.filter((x) => evidence[x.id]?.record_id === r.id).map((x) => x.id),
   }));
 }
 
+const signature = (r: DecisionRecord) => JSON.stringify(r.quotes);
+
 // Rebuilds from the full event + transcript history each time (callers pass everything so far).
-// Rules from `previous` that are confirmed are kept; everything else is re-derived from the expert's words.
+// A record whose quotes are unchanged keeps its previous rules (and their confirmation) without a model call.
+// A record whose quotes changed (new answer or a correction) loses its old rules, which are re-extracted unconfirmed.
 export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWithRecords> {
   const job = loadJob(input.job_id);
-  const prevRecords = ((input.previous as WorkMapWithRecords | undefined)?.records ?? []);
-  const confirmedIds = new Set(prevRecords.filter((r) => r.status !== "unconfirmed").map((r) => r.id));
+  if (!job) throw new Error(`[brain] unknown job ${input.job_id}`);
+  const prev = input.previous as WorkMapWithRecords | undefined;
+  const corrections = prev?.corrections ?? [];
+  const pii = piiValues(job);
+  const events = canonicalEvents(job, input.events);
 
-  const records = captureDecisions({
-    events: job ? canonicalEvents(job, input.events) : input.events, transcript: input.transcript,
-    piiNames: piiValues(job), escalateTo: job?.job.escalate_to,
-  }).map((r) => {
-    const prev = prevRecords.find((p) => p.id === r.id);
-    return prev && confirmedIds.has(r.id) ? { ...r, status: prev.status } : r;
+  let records = captureDecisions({ events, transcript: input.transcript, piiNames: pii, escalateTo: job.job.escalate_to });
+  records = applyCorrections(records, corrections, pii);
+
+  const prevRecords = new Map((prev?.records ?? []).map((r) => [r.id, r]));
+  const prevEvidence = prev?.rule_sources ?? {};
+  const unchanged = new Set(records.filter((r) => prev?.extracted?.[r.id] === signature(r)).map((r) => r.id));
+  records = records.map((r) => {
+    const p = prevRecords.get(r.id);
+    return unchanged.has(r.id) && p && p.status === "confirmed" ? { ...r, status: "confirmed" as const } : r;
   });
 
-  const keep = (input.previous?.rules ?? []).filter((r) => r.confirmed);
-  const fresh = await extractRules(records, job);
-  const rules = [...keep, ...fresh.filter((f) => !keep.some((k) => k.id === f.id))];
+  // Keep rules only for unchanged records; everything from changed records is obsolete.
+  const kept = (prev?.rules ?? []).filter((x) => unchanged.has(prevEvidence[x.id]?.record_id ?? ""));
+  const todo = records.filter((r) => !unchanged.has(r.id));
+  const cases = expertCases(job, onRecordOnly(events, input.transcript).events, (rec) => screenValues(job, rec));
+  const fresh = await extractRules(todo, job, cases);
+
+  const rules = [...kept, ...fresh.rules];
+  const rule_sources: Record<string, RuleEvidence> = {};
+  for (const x of kept) rule_sources[x.id] = prevEvidence[x.id];
+  Object.assign(rule_sources, fresh.evidence);
+
+  // Remember what rules were built from, so unchanged records skip the model next time.
+  const extracted: Record<string, string> = {};
+  for (const r of records) {
+    if (unchanged.has(r.id)) extracted[r.id] = prev!.extracted![r.id];
+    else if (fresh.ok && r.why !== null) extracted[r.id] = signature(r);
+  }
 
   return {
-    ...(input.previous ?? emptyWorkMap(input.job_id, input.expert)),
+    ...(prev ?? emptyWorkMap(input.job_id, input.expert)),
     job_id: input.job_id,
     expert: input.expert,
-    steps: stepsFrom(records, rules),
+    steps: stepsFrom(records, rules, rule_sources),
     rules,
     open_gaps: recordsToGaps(records),
     records,
+    rule_sources,
+    corrections,
+    extracted,
+    rejected_rules: fresh.rejected.map((r) => ({ record_id: r.candidate.record_id, text: r.candidate.text, reason: r.reason })),
   };
 }
 
-// Teach-back confirmed: mark every grounded record and rule confirmed.
+// Teach-back confirmed: mark every grounded record and every rule confirmed. Only confirmed rules enforce in checkAction.
 export function confirmWorkMap(map: WorkMapWithRecords, at = new Date().toISOString()): WorkMapWithRecords {
   return {
     ...map,

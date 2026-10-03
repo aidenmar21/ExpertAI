@@ -13,9 +13,11 @@
     "@understudy/shared": "*"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15"
   },
   "scripts": {
-    "test": "tsx test/loop.test.ts"
+    "test": "tsx test/loop.test.ts && node test/browser-safe.mjs",
+    "test:model": "tsx test/model.test.ts"
   }
 }

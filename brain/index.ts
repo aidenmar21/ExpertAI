@@ -52,12 +52,24 @@ function violation(rule: Rule, action: string, rec: Rec): string | null {
 // Actions that hand the case off are always safe: escalating is what most rules ask for.
 const SAFE_ACTIONS = new Set(["call_manager", "hold", "escalate", "send_to_controller", "request_info"]);
 
-export function checkAction(a: ProposedAction, map: WorkMap): CheckResult {
+export interface CheckOptions {
+  job?: JobProfile;               // applies the action's `sets` before checking must / must_not
+  includeUnconfirmed?: boolean;   // default false: only teach-back-confirmed rules enforce
+}
+
+export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions = {}): CheckResult {
   if (SAFE_ACTIONS.has(a.action)) return { ok: true };
+  const sets = opts.job?.screen.actions.find((x) => x.key === a.action)?.sets ?? {};
+  const after: Rec = { ...a.record, ...sets };
   for (const rule of map.rules) {
+    if (!rule.confirmed && !opts.includeUnconfirmed) continue;
     if (!rule.when.every((c) => evalCondition(c, a.record))) continue;
-    const why = violation(rule, a.action, a.record)
-      ?? (rule.then.escalate_to ? `this needs ${rule.then.escalate_to}` : null);
+    // Escalation-only rules hold every non-handoff action; rules with explicit restrictions only enforce those.
+    const t = rule.then;
+    const escalateOnly = t.escalate_to && !t.must && !t.must_not && !t.must_not_action?.length;
+    const v = violation(rule, a.action, after);
+    const why = v ? (t.escalate_to ? `${v}; hand it to ${t.escalate_to}` : v)
+      : escalateOnly ? `this needs ${t.escalate_to}` : null;
     if (!why) continue;
     return {
       ok: false,
@@ -152,3 +164,4 @@ export function emptyWorkMap(job_id: string, expert: string): WorkMap {
 }
 
 export * from "./records";
+export * from "./validate";

@@ -25,7 +25,9 @@ export interface DecisionRecord {
   exceptions: string[];         // "what would change it", expert's words
   guardrails: string[];         // "when to stop / never", expert's words
   escalate_to?: string;
-  quotes: string[];             // every expert line used, verbatim (redacted)
+  quotes: string[];             // every expert answer used, verbatim (redacted)
+  quote_t?: number[];           // transcript t of each quote (same order as quotes)
+  superseded?: { why: string | null; quotes: string[]; replaced_at: number }; // reasoning before a correction
   sources: DecisionSources;
   asked: QuestionKind[];        // which questions were already asked (no repeats)
   unknown: QuestionKind[];      // asked or needed but not answered
@@ -118,7 +120,7 @@ export function captureDecisions(input: CaptureInput): DecisionRecord[] {
       const d = describeEvent(e);
       r = {
         id: `dr-${e.id}`, record: e.record, what: clean(d.what), how: d.how ? clean(d.how) : null,
-        why: null, exceptions: [], guardrails: [], quotes: [],
+        why: null, exceptions: [], guardrails: [], quotes: [], quote_t: [],
         sources: { event_ids: [e.id], transcript_t: [], screen_moment: { t: e.t, record: e.record, frameId: e.frameId } },
         asked: [], unknown: [], status: "unconfirmed",
       };
@@ -153,6 +155,7 @@ export function captureDecisions(input: CaptureInput): DecisionRecord[] {
 
     const said = clean(text);
     r.quotes.push(said);
+    r.quote_t!.push(answer[0].t);
     r.sources.transcript_t.push(...answer.map((a) => a.t));
     r.unknown = r.unknown.filter((k) => k !== kind);
     if (kind === "why") r.why = r.why ? `${r.why} ${said}` : said;
@@ -194,13 +197,46 @@ export function recordsToGaps(records: DecisionRecord[]): OpenGap[] {
     .map((r) => ({ id: `gap-${r.id}`, question: questionFor(r, "why"), about_event_id: r.sources.event_ids[0] }));
 }
 
+// ---------- Work Map with records ----------
+// What the expert said to correct a decision, e.g. in the debrief or teach-back.
+export interface Correction { record_id: string; text: string; t: number }
+
+// WorkMap plus brain's extras. Structurally a WorkMap, so existing consumers keep working.
+export type WorkMapWithRecords = WorkMap & {
+  records: DecisionRecord[];
+  rule_sources?: Record<string, import("./validate").RuleEvidence>;   // rule id -> exact quote + source
+  corrections?: Correction[];
+  extracted?: Record<string, string>;      // record id -> quotes signature the rules were built from
+  rejected_rules?: { record_id: string; text: string; reason: string }[];
+};
+
+// Replaces a record's reasoning with the expert's correction. Old quotes are kept only as history,
+// so no rule can be grounded in them any more. Corrected text is redacted like any other answer.
+export function applyCorrections(records: DecisionRecord[], corrections: Correction[], piiNames: string[] = []): DecisionRecord[] {
+  return records.map((r) => {
+    const mine = corrections.filter((c) => c.record_id === r.id).sort((a, b) => a.t - b.t);
+    if (!mine.length) return r;
+    const last = mine[mine.length - 1];
+    const text = redact(last.text, piiNames);
+    return {
+      ...r,
+      superseded: { why: r.why, quotes: r.quotes, replaced_at: last.t },
+      why: text, quotes: [text], quote_t: [last.t], exceptions: [], guardrails: [],
+      unknown: r.unknown.filter((k) => k !== "why"),
+      sources: { ...r.sources, transcript_t: [...r.sources.transcript_t, last.t] },
+      status: "corrected",
+    };
+  });
+}
+
+// Records a correction on the map. The next buildWorkMap drops the obsolete rules and re-extracts from the correction.
+export function correctWorkMap(map: WorkMapWithRecords, c: Correction): WorkMapWithRecords {
+  return { ...map, corrections: [...(map.corrections ?? []), c] };
+}
+
 // ---------- Confirmation ----------
 export function confirmRecords(records: DecisionRecord[], ids?: string[]): DecisionRecord[] {
   return records.map((r) => (!ids || ids.includes(r.id)) && r.why !== null ? { ...r, status: "confirmed" } : r);
-}
-
-export function correctRecord(records: DecisionRecord[], id: string, patch: Partial<Pick<DecisionRecord, "why" | "exceptions" | "guardrails" | "escalate_to">>, quote: string): DecisionRecord[] {
-  return records.map((r) => r.id === id ? { ...r, ...patch, quotes: [...r.quotes, quote], status: "corrected" } : r);
 }
 
 // ---------- Agent-facing text ----------
