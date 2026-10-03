@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type {
   JobProfile, Rule, ScreenEvent, TranscriptLine, Value, WorkMap, WorkMapStep,
 } from "@understudy/shared";
-import { canonicalEvents, emptyWorkMap, onRecordOnly } from "./index";
+import { canonicalEvents, emptyWorkMap, onRecordOnly, redact, redactDeep, redactTranscript } from "./index";
+import { score, runTutorCases, rulesLearned, type ScoreInput, type TutorCaseResult } from "./eval";
 import {
   applyCorrections, applyLinks, captureDecisions, linksToCorrections, recordsToGaps, unlinkedExpertLines, validateLinks,
   type DecisionRecord, type LineLink, type WorkMapWithRecords,
@@ -51,7 +52,7 @@ export function screenValues(job: JobProfile | null, recordId: string | undefine
   return hit ? Object.fromEntries(Object.entries(hit).filter(([k]) => !pii.has(k))) as Record<string, Value> : null;
 }
 
-function piiValues(job: JobProfile | null): string[] {
+export function piiValues(job: JobProfile | null): string[] {
   if (!job) return [];
   const keys = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
   const recs = (job.records as { expert?: Record<string, unknown>[]; new_hire?: Record<string, unknown>[] } | undefined) ?? {};
@@ -118,7 +119,7 @@ Strict grounding:
 - screen_values shows what was on screen for that case. Use it only to find the exact field and value for something the expert named (e.g. "access codes" -> item eq the on-screen access-code product). Use eq or in with the exact on-screen value(s).
 - Outcomes: must / must_not are field values after the action; must_not_action lists actions to block; escalate_to blocks every action except handing off. Prefer must_not_action when the expert only restricts some actions (e.g. "I call the manager before refunding" -> must_not_action [refund], escalate_to manager).
 - When one answer states several independent rules, emit them as separate rules.
-- status "corrected": the expert replaced their earlier reasoning (replaced_reasoning, context only, never quote it). Emit every rule the corrected quotes state, including changed limits ("the shift manager limit is two hundred dollars, not a hundred" -> price gt 200, escalate to the shift manager, blocking the actions the replaced rule blocked). Use the replaced reasoning only to understand what the limit or rule applies to. Quote and evidence must come from the corrected quotes.
+- status "corrected": quotes from corrections_start on are the expert's corrections. They override earlier quotes where they disagree (a changed limit, a reversed decision). Emit rules from the corrections, quoting them ("the shift manager limit is two hundred dollars, not a hundred" -> price gt 200, escalate to the shift manager, blocking the same actions the earlier limit blocked). Still emit earlier rules the correction does NOT contradict, quoting the earlier words. Never emit a rule the correction replaced.
 Return {"rules": []} if nothing is grounded.`;
 
 export interface ExtractResult {
@@ -158,8 +159,8 @@ export async function extractRules(records: DecisionRecord[], job: JobProfile, c
     records: grounded.map((r) => ({
       record_id: r.id, record: r.record, status: r.status, screen_values: screenValues(job, r.record), what: r.what, how: r.how, why: r.why,
       exceptions: r.exceptions, guardrails: r.guardrails, escalate_to: r.escalate_to ?? null, quotes: r.quotes,
-      // Context only: what the correction replaced. Never quote it; reason_quote must come from `quotes`.
-      replaced_reasoning: r.superseded ? r.superseded.quotes : undefined,
+      // quotes[corrections_start..] are the expert's corrections and win over earlier quotes.
+      corrections_start: r.corrected_from,
     })),
   };
   try {
@@ -270,18 +271,20 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   const corrections = prev?.corrections ?? [];
   const pii = piiValues(job);
   const events = canonicalEvents(job, input.events);
+  // Redact once up front: every later step (capture, model calls, link validation) only sees redacted text.
+  const transcript = input.transcript.map((l) => ({ ...l, text: redact(l.text, pii) }));
 
-  let records = captureDecisions({ events, transcript: input.transcript, piiNames: pii, escalateTo: job.job.escalate_to });
+  let records = captureDecisions({ events, transcript: transcript, piiNames: pii, escalateTo: job.job.escalate_to });
 
   // Late links: expert lines no question captured (debrief answers, spoken corrections). Each line is sent to the model once.
   const links: Record<string, LineLink | null> = { ...(prev?.links ?? {}) };
-  const fresh = unlinkedExpertLines(records, input.transcript).filter((l) => !(String(l.t) in links));
-  const found = await linkLines(records, fresh, input.transcript);
+  const fresh = unlinkedExpertLines(records, transcript).filter((l) => !(String(l.t) in links));
+  const found = await linkLines(records, fresh, transcript);
   if (found) {
     for (const l of fresh) links[String(l.t)] = null;
     for (const k of found) links[String(k.line_t)] = k;
   }
-  const valid = validateLinks(Object.values(links).filter((k): k is LineLink => !!k), records, input.transcript.filter((l) => !l.off_record));
+  const valid = validateLinks(Object.values(links).filter((k): k is LineLink => !!k), records, transcript.filter((l) => !l.off_record));
   records = applyLinks(records, valid, pii);
   const allCorrections = [...corrections, ...linksToCorrections(valid).filter((c) => !corrections.some((x) => x.t === c.t))];
   records = applyCorrections(records, allCorrections, pii);
@@ -297,7 +300,7 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   // Keep rules only for unchanged records; everything from changed records is obsolete.
   const kept = (prev?.rules ?? []).filter((x) => unchanged.has(prevEvidence[x.id]?.record_id ?? ""));
   const todo = records.filter((r) => !unchanged.has(r.id));
-  const cases = expertCases(job, onRecordOnly(events, input.transcript).events, (rec) => screenValues(job, rec));
+  const cases = expertCases(job, onRecordOnly(events, transcript).events, (rec) => screenValues(job, rec));
   const extractedNow = await extractRules(todo, job, cases);
 
   const rules = [...kept, ...extractedNow.rules];
@@ -312,7 +315,9 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
     else if (extractedNow.ok && r.why !== null) extracted[r.id] = signature(r);
   }
 
-  return {
+  // Last pass: no PII in any string of the map, including model-written rule text.
+  // reason_quote is redacted the same way its source quote already was, so evidence still matches.
+  return redactDeep({
     ...(prev ?? emptyWorkMap(input.job_id, input.expert)),
     job_id: input.job_id,
     expert: input.expert,
@@ -325,7 +330,7 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
     links,
     extracted,
     rejected_rules: extractedNow.rejected.map((r) => ({ record_id: r.candidate.record_id, text: r.candidate.text, reason: r.reason })),
-  };
+  }, pii);
 }
 
 // Teach-back confirmed: mark every grounded record and every rule confirmed. Only confirmed rules enforce in checkAction.
@@ -336,4 +341,23 @@ export function confirmWorkMap(map: WorkMapWithRecords, at = new Date().toISOStr
     records: map.records.map((r) => (r.why !== null ? { ...r, status: "confirmed" as const } : r)),
     confirmed_at: at,
   };
+}
+
+// ---------- Scoring and transcript (server: these read the answer key / PII lists) ----------
+export interface ScoreSessionResult {
+  scoreboard: ReturnType<typeof score>;
+  tutor: TutorCaseResult[];                       // per new-hire case: caught / false alarm
+  rules: { id: string; learned: boolean }[];      // per answer-key rule (ids only, never the rule text)
+}
+
+// For POST /api/score. Loads the job (with its answer key) on the server; returns numbers and ids only.
+export function scoreSession(input: Omit<ScoreInput, "job"> & { job_id: string }): ScoreSessionResult {
+  const job = loadJob(input.job_id);
+  if (!job) throw new Error(`[brain] unknown job ${input.job_id}`);
+  return { scoreboard: score({ ...input, job }), tutor: runTutorCases(job, input.map), rules: rulesLearned(job, input.map) };
+}
+
+// Transcript safe to show or store for this job: off-record replaced, PII (patterns + this job's PII values) redacted.
+export function redactTranscriptForJob(job_id: string, transcript: TranscriptLine[]): TranscriptLine[] {
+  return redactTranscript(transcript, piiValues(loadJob(job_id)));
 }

@@ -94,6 +94,7 @@ export function validateCandidates(cands: RuleCandidate[], o: ValidateOptions): 
   const rules: Rule[] = [], rejected: Rejection[] = [];
   const evidence: Record<string, RuleEvidence> = {};
   const reject = (candidate: RuleCandidate, reason: string) => { rejected.push({ candidate, reason }); };
+  const kept = new Map<string, RuleCandidate>();
 
   const badValue = (field: string, v: unknown): string | null => {
     const f = fields.get(field);
@@ -182,6 +183,20 @@ export function validateCandidates(cands: RuleCandidate[], o: ValidateOptions): 
     if (rules.some((r) => r.id === rule.id)) continue;   // duplicate
     rules.push(rule);
     evidence[rule.id] = { record_id: rec.id, quote_index: qi, quote_t: rec.quote_t?.[qi] ?? null, event_ids: rec.sources.event_ids };
+    kept.set(rule.id, c);
+  }
+
+  // Corrections win: a rule from an earlier quote is dropped when a rule from a correction constrains the same field.
+  for (const rec of o.records.filter((r) => r.corrected_from !== undefined)) {
+    const mine = rules.filter((r) => evidence[r.id]?.record_id === rec.id);
+    const fromCorrection = mine.filter((r) => evidence[r.id].quote_index >= rec.corrected_from!);
+    const corrected = new Set(fromCorrection.flatMap((r) => r.when.map((w) => w.field)));
+    for (const r of mine) {
+      if (evidence[r.id].quote_index >= rec.corrected_from! || !r.when.some((w) => corrected.has(w.field))) continue;
+      rules.splice(rules.indexOf(r), 1);
+      delete evidence[r.id];
+      reject(kept.get(r.id)!, "superseded by the expert's correction");
+    }
   }
   return { rules, evidence, rejected };
 }

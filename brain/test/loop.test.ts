@@ -9,10 +9,12 @@ import {
   unlinkedExpertLines, validateLinks, classifyQuestion, type LineLink,
   type RuleCandidate, type WorkMapWithRecords,
 } from "../index";
-import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, screenValues } from "../server";
+import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, screenValues, scoreSession, redactTranscriptForJob } from "../server";
+import { runTutorCases, rulesLearned, OFF_RECORD_TEXT } from "../index";
 import { events, transcript, debrief, ev, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
-delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
+delete process.env.ANTHROPIC_API_KEY;
+const emptyMap = (job_id: string) => ({ job_id, expert: "Aarav", steps: [], rules: [] as Rule[], open_gaps: [] });   // guarantee no model call in this file
 
 (async () => {
   const job = loadJob("returns-desk")!;
@@ -128,25 +130,33 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
   assert.equal(checkAction({ action: "refund", record: nh[4] }, map1, { job }).ok, true, "N5 routine stays silent");
   console.log("ok tutor: N1 ->", n1.explanation);
 
-  // 5. Correction: obsolete rules are dropped, record re-grounded on the correction.
+  // 5. Correction: only the contradicted rule is replaced; the record keeps its other rules.
   const prev: WorkMapWithRecords = {
     ...map1,
     extracted: Object.fromEntries(recs.filter((r) => r.why).map((r) => [r.id, JSON.stringify(r.quotes)])),
   };
-  const corrected = correctWorkMap(prev, { record_id: x3.id, text: CORRECTION_TEXT, t: 300_000 });
+  const LIMIT_ONLY = "The shift manager limit is two hundred dollars, not a hundred.";
+  const corrected = correctWorkMap(prev, { record_id: x3.id, text: LIMIT_ONLY, t: 300_000 });
   const rebuilt = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript, previous: corrected });
   const x3b = rebuilt.records.find((r) => r.id === x3.id)!;
   assert.equal(x3b.status, "corrected");
-  assert.deepEqual(x3b.quotes, [CORRECTION_TEXT]);
-  assert.match(x3b.superseded!.quotes.join(" "), /over a hundred dollars/);
-  assert.ok(!rebuilt.rules.some((r) => rebuilt.rule_sources![r.id]?.record_id === x3.id), "rules from the corrected record are gone (no key: none re-extracted)");
+  assert.equal(x3b.quotes[x3b.corrected_from!], LIMIT_ONLY, "correction appended after the earlier quotes");
+  assert.match(x3b.quotes.join(" "), /No receipt means store credit only/, "earlier words kept");
   assert.ok(rebuilt.rules.some((r) => r.text === "Opened access codes are not refundable" && r.confirmed), "unrelated confirmed rule kept");
-  assert.equal(checkAction({ action: "refund", record: nh[0] }, rebuilt, { job }).ok, true, "obsolete $100 rule no longer enforced");
-  assert.equal(rebuilt.extracted![x3.id], undefined, "corrected record queued for re-extraction");
-  const stale = validateCandidates(cands.slice(1, 3), { job, records: rebuilt.records, cases });
-  assert.equal(stale.rules.length, 0, "old quotes cannot ground a rule after the correction");
+  assert.equal(rebuilt.extracted![x3.id], undefined, "corrected record queued for re-extraction (no key here)");
+  // SIMULATED model output for the corrected record: it re-emits the old $100 rule, the no-receipt rule, and the new $200 rule.
+  const after = validateCandidates([
+    cands[1], cands[2],
+    C({ text: "Over $200: shift manager", type: "limit", when: [{ field: "price", op: "gt", value: 200, evidence: "two hundred dollars" }], must_not_action: ["refund", "store_credit"], escalate_to: "Shift manager", reason_quote: "The shift manager limit is two hundred dollars, not a hundred" }),
+  ], { job, records: rebuilt.records, cases });
+  assert.deepEqual(after.rules.map((r) => r.text).sort(), ["No receipt: store credit only", "Over $200: shift manager"], "uncontradicted no-receipt rule survives");
+  assert.match(after.rejected.find((r) => r.candidate.text.startsWith("Over $100"))!.reason, /superseded by the expert's correction/);
+  const m2 = confirmWorkMap({ ...rebuilt, rules: [...rebuilt.rules, ...after.rules], rule_sources: { ...rebuilt.rule_sources, ...after.evidence } });
+  assert.equal(checkAction({ action: "refund", record: nh[0] }, m2, { job }).ok, true, "$142 allowed under the $200 limit");
+  assert.equal(checkAction({ action: "refund", record: { ...nh[0], price: 250 } }, m2, { job }).ok, false, "$250 blocked");
+  assert.equal(checkAction({ action: "refund", record: { ...nh[2], price: 40 } }, m2, { job }).ok, false, "no-receipt rule still enforced");
   assert.equal(applyCorrections(recs, [])[0], recs[0]);
-  console.log("ok correction: obsolete rules dropped; old quotes can no longer ground rules");
+  console.log("ok correction: $100 superseded by $200; no-receipt rule kept");
 
   // 5b. Debrief: a question naming the record links at any age; spoken correction via (SIMULATED) model links.
   const full = [...transcript, ...debrief];
@@ -167,8 +177,7 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
     previous: { ...prev, links: { "160000": null, "425000": kept[0], "442000": null } } as WorkMapWithRecords });
   const x3s = spoken.records.find((r) => r.id === x3d.id)!;
   assert.equal(x3s.status, "corrected");
-  assert.deepEqual(x3s.quotes, ["The shift manager limit is two hundred dollars, not a hundred."]);
-  assert.ok(!spoken.rules.some((r) => spoken.rule_sources![r.id]?.record_id === x3d.id), "obsolete rules dropped after a spoken correction");
+  assert.equal(x3s.quotes[x3s.corrected_from!], "The shift manager limit is two hundred dollars, not a hundred.");
   assert.ok(!spoken.open_gaps.some((g) => g.about_event_id === "e0"), "debrief answer closed the X1 gap");
   console.log("ok debrief: record-named question linked late; spoken correction applied; paraphrase/off-record links rejected");
 
@@ -192,8 +201,50 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
     groundTruth: [{ t: 1000, field: "refund_method", from: "Cash", to: "Original card" }, { t: 5000, field: "purchase_date", from: null, to: "2026-09-30" }],
     events: [ev("v1", 2500, "R-88104", "refund_to", "Cash", "Original card"), ev("v2", 6000, "R-88104", "purchased", null, "2026-09-30")] });
   assert.equal(sb.vision_accuracy, 1);
-  assert.equal(sb.rules_total, 6);
+  assert.equal(sb.rules_total, 4);
   assert.equal(redact("call 555-123-4567 or a@b.co"), "call [PHONE] or [EMAIL]");
+
+  // 8. Answer-key scoring (SIMULATED maps). Returns desk with the 3 demo rules: R4 (card -> never cash) not taught.
+  assert.deepEqual(rulesLearned(job, map1).map((x) => `${x.id}:${x.learned}`), ["R1:true", "R2:true", "R3:true", "R4:false"]);
+  const tutor = runTutorCases(job, map1);
+  assert.deepEqual(tutor.map((x) => `${x.case}:${x.trap ? (x.caught ? "caught" : "MISSED") : "-"}${x.false_alarm ? ":FALSE_ALARM" : ""}`),
+    ["N1:caught", "N2:-", "N3:caught", "N4:caught", "N5:-"], "N1/N3/N4 caught; N2/N5 silent");
+  const ss = scoreSession({ job_id: "returns-desk", map: map1, questions: [p1, p2, p3] });
+  assert.deepEqual(ss.scoreboard, { rules_learned: 3, rules_total: 4, vision_accuracy: 0, tutor_catches: 3, tutor_traps: 3, false_alarms: 0, live_questions: 3, guardrail_questions: 1 });
+  assert.ok(!JSON.stringify(ss).includes("refundable") && !JSON.stringify(ss).includes("PLACEHOLDER"), "score result carries ids and numbers, not answer-key text");
+  assert.deepEqual(score({ job, map: emptyMap(job.job.id) }).tutor_catches, 0);
+  // Invoice approval: a map implementing all six answer-key rules must learn 6/6, catch 4/4, no false alarms.
+  const inv = loadJob("invoice-approval")!;
+  const R = (id: string, when: Rule["when"], then: Rule["then"]): Rule => ({ id, text: id, type: "guardrail", when, then, reason_quote: id, screen_moment: { t: 0 }, source: "policy", confirmed: true });
+  const invMap = { ...emptyMap("invoice-approval"), rules: [
+    R("capex", [{ field: "amount", op: "gt", value: 5000 }], { must: { cost_center: "0400" } }),
+    R("asset", [{ field: "cost_center", op: "eq", value: "0400" }, { field: "asset_number", op: "missing" }], { must_not_action: ["approve"] }),
+    R("dup-dn", [{ field: "delivery_note_history", op: "eq", value: "Already paid" }], { must_not_action: ["approve"], escalate_to: "Controller" }),
+    R("kovotech", [{ field: "supplier", op: "eq", value: "Kovotech s.r.o." }], { must_not_action: ["approve"], escalate_to: "Controller" }),
+    R("unknown-supplier", [{ field: "supplier_master", op: "eq", value: "Not in master data" }], { must_not_action: ["approve"], escalate_to: "Controller" }),
+    R("over-10k", [{ field: "amount", op: "gt", value: 10000 }], { must_not_action: ["approve"], escalate_to: "Controller" }),
+  ] };
+  const isb = score({ job: inv, map: invMap });
+  assert.deepEqual([isb.rules_learned, isb.rules_total, isb.tutor_catches, isb.tutor_traps, isb.false_alarms], [6, 6, 4, 4, 0], "invoice answer key + probes are consistent");
+  const invEmpty = score({ job: inv, map: emptyMap("invoice-approval") });
+  assert.deepEqual([invEmpty.rules_learned, invEmpty.tutor_catches, invEmpty.false_alarms], [0, 0, 0]);
+  console.log(`ok scoring: returns ${ss.scoreboard.rules_learned}/${ss.scoreboard.rules_total} rules, ${ss.scoreboard.tutor_catches}/${ss.scoreboard.tutor_traps} traps, ${ss.scoreboard.false_alarms} false alarms; invoice key 6/6, 4/4, 0`);
+
+  // 9. Redaction + off-record end to end (judge test 5).
+  const piiTalk: typeof transcript = [
+    ...transcript,
+    { t: 500_000, speaker: "agent", text: "Why did you change status from Open to Denied on R-88102?" },
+    { t: 501_000, speaker: "expert", text: "Priya Raman paid with Mastercard ending 0932, call her at 555-201-7788. Opened access codes are never refundable." },
+  ];
+  const red = await buildWorkMap({ job_id: "returns-desk", expert: "Aarav", events, transcript: piiTalk });
+  const blob = JSON.stringify(red);
+  for (const bad of ["Priya Raman", "0932", "555-201-7788", "Jordan Ellis", "cousin", "Regulars"]) assert.ok(!blob.includes(bad), `Work Map leaks "${bad}"`);
+  assert.match(blob, /\[NAME\] paid with \[CARD\], call her at \[PHONE\]/);
+  const shown = redactTranscriptForJob("returns-desk", piiTalk);
+  assert.ok(shown.filter((l) => l.t >= 141_000 && l.t < 160_000).every((l) => l.text === OFF_RECORD_TEXT), "off-record lines masked");
+  assert.ok(!JSON.stringify(shown).match(/Priya Raman|0932|Jordan Ellis|cousin/), "panel transcript redacted");
+  assert.equal(shown.find((l) => l.t === 160_000)!.text, "Okay, back on the record.", "on-record lines kept");
+  console.log("ok redaction: Work Map and panel transcript carry no PII or off-record text");
 
   const _typecheck: Rule[] = map1.rules;
   void _typecheck;

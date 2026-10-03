@@ -1,6 +1,6 @@
 // brain package entry. Browser-safe: rule checker, redaction, scoreboard. Server-only code goes in server.ts.
 import type {
-  CheckResult, Condition, JobProfile, ProposedAction, Rule, Scoreboard, ScreenEvent, Value, WorkMap,
+  CheckResult, Condition, JobProfile, ProposedAction, Rule, ScreenEvent, TranscriptLine, Value, WorkMap,
 } from "@understudy/shared";
 
 type Rec = Record<string, Value>;
@@ -101,6 +101,28 @@ export function redact(text: string, names: string[] = []): string {
   return out;
 }
 
+export const OFF_RECORD_TEXT = "[off the record]";
+
+// Transcript as the panel may show and store it: off-record lines (and anything said inside an off-record window)
+// replaced by a marker, PII redacted everywhere else.
+export function redactTranscript(transcript: TranscriptLine[], names: string[] = []): TranscriptLine[] {
+  const sorted = [...transcript].sort((a, b) => a.t - b.t);
+  let off = false;
+  return sorted.map((l) => {
+    if (l.off_record) off = true; else if (off) off = false;
+    return l.off_record || off ? { ...l, text: OFF_RECORD_TEXT } : { ...l, text: redact(l.text, names) };
+  });
+}
+
+// Every string in a value, redacted. Used as a last pass over the Work Map so model-written text can't leak PII.
+export function redactDeep<T>(value: T, names: string[] = []): T {
+  if (typeof value === "string") return redact(value, names) as T;
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, names)) as T;
+  if (value && typeof value === "object")
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v, names)])) as T;
+  return value;
+}
+
 // Redacts PII fields (per job profile) out of a record.
 export function redactRecord(rec: Rec, job: JobProfile): Rec {
   const pii = new Set(job.screen.fields.filter((f) => f.pii).map((f) => f.key));
@@ -122,46 +144,10 @@ export function canonicalEvents(job: JobProfile, events: ScreenEvent[]): ScreenE
   return events.map((e) => (e.field ? { ...e, field: canonicalField(job, e.field) } : e));
 }
 
-// ---------- Scoreboard ----------
-export interface GroundTruthChange { t: number; field: string; from: Value; to: Value; record?: string; }
-
-export interface ScoreInput {
-  job: JobProfile;
-  map: WorkMap;
-  groundTruth?: GroundTruthChange[];
-  events?: ScreenEvent[];
-  tutor?: { catches: number; traps: number; false_alarms: number };
-  questions?: { live: number; guardrail: number };
-  // hidden rule id -> learned rule ids; filled by a judge/LLM later. Without it, counts confirmed rules capped at total.
-  matches?: Record<string, string[]>;
-}
-
-export function score(s: ScoreInput): Scoreboard {
-  const hidden = (s.job.hidden_rules as { id: string }[] | undefined) ?? [];
-  const learned = s.matches
-    ? hidden.filter((h) => (s.matches![h.id] ?? []).length > 0).length
-    : Math.min(hidden.length, s.map.rules.filter((r) => r.confirmed).length);
-
-  const gt = s.groundTruth ?? [];
-  const evs = canonicalEvents(s.job, s.events ?? []).filter((e) => e.field);
-  const hit = gt.filter((g) =>
-    evs.some((e) => same(e.field, g.field) && same(e.to, g.to) && Math.abs(e.t - g.t) < 10_000)).length;
-
-  return {
-    rules_learned: learned,
-    rules_total: hidden.length,
-    vision_accuracy: gt.length ? hit / gt.length : 0,
-    tutor_catches: s.tutor?.catches ?? 0,
-    tutor_traps: s.tutor?.traps ?? 0,
-    false_alarms: s.tutor?.false_alarms ?? 0,
-    live_questions: s.questions?.live ?? 0,
-    guardrail_questions: s.questions?.guardrail ?? 0,
-  };
-}
-
 export function emptyWorkMap(job_id: string, expert: string): WorkMap {
   return { job_id, expert, steps: [], rules: [], open_gaps: [] };
 }
 
 export * from "./records";
 export * from "./validate";
+export * from "./eval";

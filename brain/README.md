@@ -41,7 +41,7 @@ return Response.json(map);
 Spoken debrief answers and teach-back corrections are picked up **automatically** from the transcript. No extra call is needed:
 - A question that names the record ("...on R-88101?") links its answer at any age. Otherwise an answer must come within 60s of the question, and never across an off-record stretch.
 - Expert lines no question captured are sent to the model **once** (cached in `map.links`). The model may link a line to a decision as `why`, `exception`, `guardrail`, or `correction`, but only by quoting the line verbatim. Brain validates the quote, that the line is on the record, and that the record exists.
-- A `correction` replaces that decision's reasoning. Its old rules are dropped, and new ones are extracted from the correction, unconfirmed.
+- A `correction` is added to that decision's quotes and wins where it disagrees. A rule from an earlier quote is dropped only if a rule from the correction constrains the same field. "The limit is two hundred, not a hundred" replaces the $100 rule but keeps "no receipt means store credit only". Rules from a corrected decision need re-confirmation.
 
 ```ts
 // expert said "yes, that's right" -> POST /api/workmap { ..., confirm: true }
@@ -61,6 +61,21 @@ if (!res.ok) { blockSave(); sendContext({ kind: "guardrail_hit", check: res }); 
 - Pass `job` so the action's `sets` (e.g. `store_credit` sets `refund_method`) are applied before checking.
 - Handoff actions (`call_manager`, `hold`, `send_to_controller`, `request_info`) always pass.
 - `record` uses job field keys. `canonicalField(job, name)` maps vision labels (`refund_to`) to keys (`refund_method`).
+
+### Scoreboard (`POST /api/score`, server only: reads the answer key)
+```ts
+import { scoreSession } from "@understudy/brain/server";
+// body: { job_id, map /* confirmed */, groundTruth?, events?, questions? /* QuestionPick[] sent as ask_now */ }
+const { scoreboard, tutor, rules } = scoreSession(body);
+```
+- `rules_learned`: an answer-key rule counts when the confirmed map blocks all of its `probes` (behavior, not wording).
+- `tutor_catches / tutor_traps / false_alarms`: each new-hire case's `expected.wrong` must be blocked and `expected.right` allowed. Returns desk: N1, N3, N4 are traps; N2 and N5 must stay silent.
+- `vision_accuracy`: ground-truth changes matched by vision events (same field after label->key mapping, same value, within 10s).
+- The result holds only numbers and ids. `hidden_rules`, `probes`, and `expected` never leave the server.
+
+### Privacy (judge test 5)
+- `buildWorkMap` redacts the transcript before any step (the model never sees PII) and redacts every string of the returned map: patterns (card, IBAN, email, phone) plus the job's PII field values.
+- `redactTranscriptForJob(job_id, transcript)` (server) gives the panel a transcript with off-record lines replaced by `[off the record]` and PII redacted.
 
 ### Question picker (engine)
 `pickFromRecords(events, transcript, { now, maxAgeMs = 60000 }) -> QuestionPick | null`. It follows up on the latest explained decision (what would change it, then when to stop with `is_guardrail: true`), then asks why about the newest unexplained decision. It never repeats a question, never re-asks after a vague answer, and stays silent off the record. Engine filters out routine decisions.
@@ -105,11 +120,14 @@ export interface LineLink { line_t: number; record_id: string; kind: "why" | "ex
 //   corrections?: Correction[];
 //   links?: Record<string, LineLink | null>;
 
+// JobField gains (already used in shared/jobs, requested by app):
+//   readonly?: boolean;   // data-only field shown as a value, not an input
+
 // checkAction gains an optional 3rd arg:
 // checkAction(a: ProposedAction, map: WorkMap, opts?: { job?: JobProfile; includeUnconfirmed?: boolean }): CheckResult
 ```
 Until then these types are exported from `@understudy/brain`.
 
 ## Tests
-- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, debrief linking, and a spoken correction (with simulated model links), confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
-- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, a two-sentence answer that must give two separate rules, and a spoken debrief + teach-back correction exactly as the app sends it. Exits 2 if no key is found.
+- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, debrief linking, a spoken correction (with simulated model links), partial corrections, answer-key scoring for both jobs, and end-to-end redaction, confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
+- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, a two-sentence answer that must give two separate rules, a spoken debrief + teach-back correction exactly as the app sends it (the no-receipt rule must survive a limit-only correction), and the scoreboard for the result. Exits 2 if no key is found.

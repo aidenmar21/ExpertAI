@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Value } from "@understudy/shared";
 import { checkAction, correctWorkMap, workMapToAgentText, type WorkMapWithRecords } from "../index";
-import { buildWorkMap, confirmWorkMap, loadJob } from "../server";
+import { buildWorkMap, confirmWorkMap, loadJob, scoreSession } from "../server";
 import { events, transcript, debrief, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
 for (const p of [join(process.cwd(), ".env.local"), join(process.cwd(), "app/.env.local"), join(process.cwd(), "../app/.env.local"), join(process.cwd(), "../.env.local")]) {
@@ -81,7 +81,7 @@ const show = (m: WorkMapWithRecords) => {
   const fromX3 = fixed.rules.filter((x) => fixed.rule_sources![x.id].record_id === x3id);
   assert.ok(fromX3.some((x) => x.when.some((c) => c.field === "price" && (c.op === "gt" || c.op === "gte") && Number(c.value) >= 199)), "corrected $200 limit rule extracted (see 'rejected:' lines above if missing)");
   assert.ok(fromX3.length >= 1, "corrected record re-extracted");
-  assert.ok(fromX3.every((x) => !before.has(x.id) && !x.confirmed), "corrected rules are new and unconfirmed");
+  assert.ok(fromX3.every((x) => !x.confirmed), "rules from the corrected record need re-confirmation");
   assert.ok(!fixed.rules.some((x) => x.when.some((c) => c.field === "price" && c.value === 100)), "obsolete $100 rule gone");
   assert.ok(fixed.rules.filter((x) => fixed.rule_sources![x.id].record_id !== x3id).every((x) => before.has(x.id) && x.confirmed), "unrelated rules kept as-is");
   assert.equal(check(fixed, "refund", nh[0]).ok, true, "before re-confirm: corrected rules not enforced");
@@ -106,6 +106,13 @@ const show = (m: WorkMapWithRecords) => {
   const spokenConf = confirmWorkMap(spoken);   // app confirms after the final "yes"
   assert.equal(check(spokenConf, "refund", nh[0]).ok, true, "$142 allowed under the spoken $200 limit");
   assert.equal(check(spokenConf, "refund", { ...nh[0], price: 250 }).ok, false, "$250 blocked");
+  assert.ok(spoken.rules.some((x) => x.when.some((c) => c.field === "receipt_no" && c.op === "missing")), "uncorrected no-receipt rule kept (correction only replaced the limit)");
+  assert.equal(check(spokenConf, "refund", { ...nh[2], price: 40 }).ok, false, "no-receipt rule still enforced after a limit-only correction");
+
+  // 5c. Answer-key score for the confirmed spoken map (numbers only).
+  const ss = scoreSession({ job_id: "returns-desk", map: spokenConf });
+  console.log(`    score: rules ${ss.scoreboard.rules_learned}/${ss.scoreboard.rules_total}, traps ${ss.scoreboard.tutor_catches}/${ss.scoreboard.tutor_traps}, false alarms ${ss.scoreboard.false_alarms}`);
+  assert.equal(ss.scoreboard.false_alarms, 0, "N2/N5 routine refunds stay silent");
 
   // 6. Aarav's live case: two independent rules in ONE answer must not merge their conditions.
   t0 = Date.now();
