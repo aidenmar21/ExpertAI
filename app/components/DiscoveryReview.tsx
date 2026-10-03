@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { btn, eyebrow, fieldCompact } from "@/components/ui/styles";
+import { auditHeaders } from "@/lib/audit";
 
 export interface Discovered {
   record_type: string;
@@ -20,7 +22,7 @@ export default function DiscoveryReview({ jobId, found, onDone }: { jobId: strin
     setSaving(true);
     await fetch(`/api/jobs/${encodeURIComponent(jobId)}/screen`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auditHeaders() },
       body: JSON.stringify({
         record_type: found.record_type,
         fields: fields.map(({ key, label, type, options }) => ({ key, label, type, ...(options ? { options } : {}) })),
@@ -31,42 +33,77 @@ export default function DiscoveryReview({ jobId, found, onDone }: { jobId: strin
     onDone();
   }
 
-  const input = "w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
-
   return (
-    <section className="mb-6 rounded-2xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
-      <p className="text-xs font-medium uppercase tracking-wider text-sky-700 dark:text-sky-300">ExpertAI learned this app</p>
-      <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+    <section aria-labelledby="discovery-title" className="mb-6 rounded-lg border border-line bg-info-surface/60 p-4">
+      <p className={`${eyebrow} text-info-ink`}>Generated screen map · review before saving</p>
+      <h3 id="discovery-title" className="mt-1 text-body font-medium text-ink">
         {fields.length} fields, {actions.length} actions
-        {found.software.length > 0 && <span className="font-normal text-slate-500"> · {known} match what {found.software.join(" / ")} normally shows</span>}
-      </p>
-      <p className="mt-1 text-xs text-slate-500">Fix anything it got wrong, then save. This becomes the job&rsquo;s screen map.</p>
+        {found.software.length > 0 && (
+          <span className="font-normal text-ink-secondary"> · {known} match what {found.software.join(" / ")} normally shows</span>
+        )}
+      </h3>
+      <p className="mt-1 text-meta text-ink-secondary">Fix anything it got wrong, then save. This becomes the job&rsquo;s screen map.</p>
 
-      <ul className="mt-3 space-y-1.5">
+      <p className={`${eyebrow} mt-4`}>Fields</p>
+      <ul className="mt-1.5 space-y-1.5">
         {fields.map((f, i) => (
-          <li key={i} className="grid grid-cols-[1fr_7rem_auto] items-center gap-2">
-            <input className={input} value={f.label} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value, key: snake(e.target.value) } : x)))} />
-            <select className={input} value={f.type} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}>
+          <li key={i} className="grid grid-cols-[minmax(0,1fr)_7rem_auto] items-center gap-2">
+            <label className="sr-only" htmlFor={`disc-field-${i}`}>Field {i + 1} label</label>
+            <input
+              id={`disc-field-${i}`}
+              className={fieldCompact}
+              value={f.label}
+              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value, key: snake(e.target.value) } : x)))}
+            />
+            <label className="sr-only" htmlFor={`disc-type-${i}`}>Field {i + 1} type</label>
+            <select
+              id={`disc-type-${i}`}
+              className={fieldCompact}
+              value={f.type}
+              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+            >
               {["text", "money", "date", "select", "status"].map((t) => <option key={t}>{t}</option>)}
             </select>
-            <button onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-xs text-slate-500 hover:text-rose-600">remove</button>
+            <button
+              type="button"
+              onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))}
+              aria-label={`Remove field ${f.label || i + 1}`}
+              className={`${btn.tertiary} ${btn.compact} text-danger-ink`}
+            >
+              Remove
+            </button>
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs font-medium uppercase tracking-wider text-slate-500">Actions</p>
+
+      <p className={`${eyebrow} mt-4`}>Actions</p>
       <ul className="mt-1.5 space-y-1.5">
         {actions.map((a, i) => (
-          <li key={i} className="grid grid-cols-[1fr_auto] items-center gap-2">
-            <input className={input} value={a.label} onChange={(e) => setActions((as) => as.map((x, j) => (j === i ? { ...x, label: e.target.value, key: snake(e.target.value) } : x)))} />
-            <button onClick={() => setActions((as) => as.filter((_, j) => j !== i))} className="text-xs text-slate-500 hover:text-rose-600">remove</button>
+          <li key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+            <label className="sr-only" htmlFor={`disc-action-${i}`}>Action {i + 1} label</label>
+            <input
+              id={`disc-action-${i}`}
+              className={fieldCompact}
+              value={a.label}
+              onChange={(e) => setActions((as) => as.map((x, j) => (j === i ? { ...x, label: e.target.value, key: snake(e.target.value) } : x)))}
+            />
+            <button
+              type="button"
+              onClick={() => setActions((as) => as.filter((_, j) => j !== i))}
+              aria-label={`Remove action ${a.label || i + 1}`}
+              className={`${btn.tertiary} ${btn.compact} text-danger-ink`}
+            >
+              Remove
+            </button>
           </li>
         ))}
       </ul>
-      <div className="mt-4 flex gap-2">
-        <button onClick={save} disabled={saving || fields.length === 0} className="rounded-xl bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
-          {saving ? "Saving…" : "Save screen map"}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={save} disabled={saving || fields.length === 0} aria-busy={saving} className={`${btn.primary} ${btn.compact}`}>
+          {saving ? "Saving screen map…" : "Save screen map"}
         </button>
-        <button onClick={onDone} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+        <button type="button" onClick={onDone} className={`${btn.secondary} ${btn.compact}`}>
           Not now
         </button>
       </div>

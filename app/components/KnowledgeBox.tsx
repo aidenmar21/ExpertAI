@@ -3,6 +3,8 @@
 import { useState, useSyncExternalStore } from "react";
 import type { Rule } from "@understudy/shared";
 import { workMaps } from "@/lib/workmap";
+import { btn, errorText, eyebrow, field, help, label as labelCls, pill } from "@/components/ui/styles";
+import { auditHeaders } from "@/lib/audit";
 
 const TEXT_KEY = (jobId: string) => `expertai:policy:${jobId}`;
 const noop = () => () => {};
@@ -31,7 +33,7 @@ export default function KnowledgeBox({ jobId }: { jobId: string }) {
     try {
       const res = await fetch("/api/policy", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ job_id: jobId, text: value }),
       });
       if (!res.ok) throw new Error("could not read the policy");
@@ -53,46 +55,54 @@ export default function KnowledgeBox({ jobId }: { jobId: string }) {
   const drop = (r: Rule) => setProposed((p) => p.filter((x) => x.id !== r.id));
 
   return (
-    <section className="mt-10">
-      <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Company knowledge</h2>
-      <p className="mt-1 text-sm text-slate-500">
-        What your company does, this job&rsquo;s goals, the steps done right, who to escalate to. ExpertAI turns it into rules you confirm.
+    <section aria-labelledby="knowledge-title" className="mt-10 border-t border-line pt-8">
+      <p className={eyebrow}>Company knowledge</p>
+      <h2 id="knowledge-title" className="mt-1 text-sub text-ink">Write what the company does differently</h2>
+      <p className="mt-2 max-w-[65ch] text-body text-ink-secondary">
+        What your company does, this job&rsquo;s goals, the steps done right, who to escalate to. ExpertAI turns it into draft rules you confirm.
       </p>
-      <textarea
-        value={value}
-        onChange={(e) => setText(e.target.value)}
-        rows={6}
-        placeholder="e.g. We are a campus bookstore. Returns within 30 days with a receipt go back to the card. Without a receipt we only give store credit. Anything over $100 needs the shift manager…"
-        className="mt-3 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-      />
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          onClick={save}
-          disabled={busy || !value.trim()}
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {busy ? "Reading…" : "Save and extract rules"}
+      <div className="mt-5">
+        <label htmlFor="knowledge-text" className={labelCls}>
+          Company policy text
+        </label>
+        <textarea
+          id="knowledge-text"
+          value={value}
+          onChange={(e) => setText(e.target.value)}
+          rows={6}
+          aria-describedby="knowledge-help"
+          aria-invalid={error ? true : undefined}
+          placeholder="e.g. We are a campus bookstore. Returns within 30 days with a receipt go back to the card. Without a receipt we only give store credit. Anything over $100 needs the shift manager…"
+          className={`${field} mt-1.5 min-h-[9rem] resize-y`}
+        />
+        <p id="knowledge-help" className={help}>Plain sentences work best: limits, exceptions, and who decides.</p>
+        {error && <p role="alert" className={errorText}>{error}</p>}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={save} disabled={busy || !value.trim()} aria-busy={busy} className={btn.primary}>
+          {busy ? "Extracting rules…" : "Save and extract rules"}
         </button>
-        {error && <p className="text-sm text-rose-600 dark:text-rose-300">{error}</p>}
       </div>
 
       {proposed.length > 0 && (
-        <ul className="mt-4 space-y-3">
+        <ul className="mt-6 space-y-3" aria-label="Proposed rules">
           {proposed.map((r) => (
-            <li key={r.id} className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-              <p className="text-xs font-medium uppercase tracking-wider text-indigo-700 dark:text-indigo-300">Proposed · {r.type.replace(/_/g, " ")}</p>
-              <input
-                value={r.text}
-                onChange={(e) => edit(r, e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              />
-              <p className="mt-2 text-xs italic text-slate-500">from: &ldquo;{r.reason_quote}&rdquo;</p>
-              <div className="mt-3 flex gap-2">
-                <button onClick={() => accept(r)} className="rounded-xl bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-500">
-                  Accept
+            <li key={r.id} className="rounded-lg border border-line bg-surface p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={pill.info}>Draft · {r.type.replace(/_/g, " ")}</span>
+                <span className="text-note text-ink-tertiary">generated from your text; edit before accepting</span>
+              </div>
+              <label htmlFor={`proposed-${r.id}`} className="sr-only">
+                Rule text
+              </label>
+              <input id={`proposed-${r.id}`} value={r.text} onChange={(e) => edit(r, e.target.value)} className={`${field} mt-3`} />
+              <p className="mt-2 text-meta text-ink-secondary">from: &ldquo;{r.reason_quote}&rdquo;</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => accept(r)} className={`${btn.primary} ${btn.compact}`}>
+                  Accept rule
                 </button>
-                <button onClick={() => drop(r)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-                  Delete
+                <button type="button" onClick={() => drop(r)} className={`${btn.dangerQuiet} ${btn.compact}`}>
+                  Delete draft
                 </button>
               </div>
             </li>

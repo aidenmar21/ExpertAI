@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { motion, useReducedMotion } from "motion/react";
 import type { ScreenEvent, ScreenState, WorkMap } from "@understudy/shared";
 import { startCapture, type CaptureHandle } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
@@ -11,6 +12,8 @@ import { useFlag } from "@/lib/flags";
 import { useInterviewLoop } from "@/lib/useInterviewLoop";
 import { rebuildWorkMap, useWorkMap } from "@/lib/workmap";
 import DiscoveryReview, { type Discovered } from "@/components/DiscoveryReview";
+import { banner, btn, card, emptyBox, eyebrow, field, link, pill } from "@/components/ui/styles";
+import { auditHeaders, logAudit } from "@/lib/audit";
 
 /** Live feed of what the apprentice saw on screen, plus the voice agent. */
 interface PanelProps { jobId: string; escalateTo: string; expert?: string; screenFields?: number; }
@@ -64,6 +67,7 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
 
   // Voice owns the off-the-record state (button or the expert saying it). Mirror it into the timeline gaps.
   useEffect(() => {
+    if (offRecordRef.current !== offRecord) logAudit(offRecord ? "off_record_start" : "off_record_end", { t: sessionT() }, "expert");
     offRecordRef.current = offRecord;
     if (offRecord) capture.current?.pause(); // off the record: no frames leave the browser
     else capture.current?.resume();
@@ -88,7 +92,7 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
     try {
       const res = await fetch("/api/discover", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ job_id: jobId, frame_jpeg_base64: frame }),
       });
       if (res.ok) setFound((await res.json()) as Discovered);
@@ -152,99 +156,137 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
   }
 
   const connected = agent.status === "connected";
+  const connecting = agent.status === "connecting";
   const statusText = inDebrief
     ? agent.debrief === "confirmed" ? "Debrief done" : "Debrief in progress"
     : agent.isAgentSpeaking
     ? "Speaking"
     : connected
       ? watching ? "Watching and listening" : "Listening"
-      : agent.status === "connecting"
+      : connecting
         ? "Connecting…"
         : watching ? "Watching (voice offline)" : "Not watching yet";
 
+  const latestEvent = events.length > 0 ? events[events.length - 1] : null;
+  const latestAgentLine = [...agent.transcript].reverse().find((l) => l.speaker === "agent") ?? null;
+  const problem = error || agent.error;
+  const denied = problem ? isPermissionDenied(problem) : false;
+
   return (
-    <aside className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <header className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${
-                agent.isAgentSpeaking
-                  ? "animate-pulse bg-indigo-500"
-                  : connected || watching
-                    ? "bg-teal-500"
-                    : "bg-slate-300 dark:bg-slate-600"
-              }`}
-            />
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">ExpertAI</h2>
+    <aside aria-label="ExpertAI apprentice" className={`${card} flex h-full flex-col overflow-hidden`}>
+      {/* ---- fixed header block ---- */}
+      <header className="border-b border-line px-5 pt-4 pb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className={eyebrow}>Expert session</p>
+            <h2 className="mt-0.5 text-card text-ink">ExpertAI</h2>
           </div>
           {watching || connected ? (
-            <button
-              onClick={stop}
-              className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Stop
+            <button type="button" onClick={stop} className={`${btn.secondary} ${btn.compact}`}>
+              Stop session
             </button>
           ) : (
-            <button
-              onClick={start}
-              className="rounded-xl bg-sky-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-sky-500"
-            >
+            <button type="button" onClick={start} className={`${btn.primary} ${btn.compact}`}>
               Start watching
             </button>
           )}
         </div>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-500">{statusText}</p>
-          {offRecord && (
-            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30">
-              Off the record
+
+        {/* status line + capture state (24.1): text, never a dot alone */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p className="text-meta text-ink-secondary" aria-live="polite">{statusText}</p>
+          {watching && !offRecord && (
+            <span className={pill.danger} role="status">
+              <span aria-hidden className="size-1.5 rounded-full bg-current" />
+              Recording screen and mic · <Elapsed running={watching} />
             </span>
           )}
-          {watching && !offRecord && (
+          {!watching && connected && !offRecord && (
+            <span className={pill.danger} role="status">
+              <span aria-hidden className="size-1.5 rounded-full bg-current" />
+              Mic on
+            </span>
+          )}
+          {offRecord && (
+            <span className={pill.danger} role="status">Off the record · nothing is kept</span>
+          )}
+          {connecting && <span className={pill.neutral}>Requesting mic access…</span>}
+        </div>
+
+        {/* gate chip: breathes only while the gate is open */}
+        {watching && !offRecord && (
+          <div className="mt-2 flex items-center gap-2">
             <span
               title="Gate: opens after 1.5s of quiet on input, speech, and screen"
-              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                loop.gateOpen
-                  ? "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300"
-                  : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-              }`}
+              className={loop.gateOpen ? pill.success : pill.neutral}
             >
+              <GateDot open={loop.gateOpen} />
               {loop.gateOpen ? "Quiet: ExpertAI may ask" : "Busy: holding questions"}
             </span>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* latest screen event + latest agent line, one line each */}
+        {(latestEvent || latestAgentLine) && (
+          <dl className="mt-3 grid gap-1 text-meta">
+            {latestEvent && (
+              <div className="flex min-w-0 gap-2">
+                <dt className="shrink-0 text-ink-tertiary">Screen</dt>
+                <dd className="min-w-0 truncate text-ink-secondary">
+                  {latestEvent.type.replace(/_/g, " ")}
+                  {latestEvent.field ? ` · ${latestEvent.field}` : ""}
+                  {latestEvent.detail ? ` · ${latestEvent.detail}` : ""}
+                </dd>
+              </div>
+            )}
+            {latestAgentLine && (
+              <div className="flex min-w-0 gap-2">
+                <dt className="shrink-0 text-ink-tertiary">ExpertAI</dt>
+                <dd className="min-w-0 truncate text-ink-secondary">{latestAgentLine.text}</dd>
+              </div>
+            )}
+          </dl>
+        )}
+
         {connected && !inDebrief && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             {offRecordEnabled && (
               <button
+                type="button"
                 onClick={toggleOffRecord}
                 aria-pressed={offRecord}
-                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                  offRecord
-                    ? "bg-rose-600 text-white shadow-sm hover:bg-rose-500"
-                    : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                }`}
+                className={`${offRecord ? btn.danger : btn.secondary} ${btn.compact}`}
               >
-                {offRecord ? "Back on the record" : "Off the record"}
+                {offRecord ? "Back on the record" : "Go off the record"}
               </button>
             )}
             <button
+              type="button"
               onClick={startDebrief}
               disabled={preparing || offRecord}
-              className="flex-1 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-60"
+              aria-busy={preparing}
+              className={`${btn.primary} ${btn.compact} flex-1`}
             >
-              {preparing ? "Preparing debrief…" : "Finish & debrief"}
+              {preparing ? "Preparing debrief…" : "Finish and debrief"}
             </button>
           </div>
         )}
-        {(error || agent.error) && (
-          <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
-            {error || agent.error}
-          </p>
+
+        {problem && (
+          <div role="alert" className={`${banner.danger} mt-3`}>
+            <div className="min-w-0">
+              <p className="font-medium">{denied ? "Screen share or microphone access was refused" : "Something went wrong"}</p>
+              <p className="mt-1 text-meta">
+                {denied
+                  ? "Nothing was recorded. Allow screen sharing and the microphone in the browser's site settings, then choose Start watching again."
+                  : problem}
+              </p>
+            </div>
+          </div>
         )}
       </header>
 
+      {/* ---- scrollable body ---- */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {found && (
           <DiscoveryReview
@@ -259,44 +301,40 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
         {inDebrief && <DebriefCard agent={agent} jobId={jobId} map={map} />}
 
         {loop.asked.length > 0 && (
-          <section className="pb-6">
-            <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">
-              Questions asked · {loop.asked.length}
-            </p>
+          <section className="pb-6" aria-label="Questions asked">
+            <p className={`${eyebrow} pb-3`}>Questions asked · {loop.asked.length}</p>
             <ol className="space-y-2">
               {[...loop.asked].reverse().map((q, i) => (
-                <li
-                  key={i}
-                  className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 text-sm text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200"
-                >
+                <li key={i} className="rounded-md bg-info-surface px-3.5 py-2.5 text-body text-ink">
+                  <span className="mr-2 text-note font-medium uppercase tracking-wider text-info-ink">ExpertAI asked</span>
                   {q.question}
-                  {q.is_guardrail && (
-                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-                      guardrail
-                    </span>
-                  )}
+                  {q.is_guardrail && <span className={`${pill.warning} ml-2`}>guardrail</span>}
                 </li>
               ))}
             </ol>
           </section>
         )}
 
-        <div className="flex items-center justify-between pb-3">
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Screen events</p>
+        <div className="flex items-center justify-between gap-3 pb-3">
+          <p className={eyebrow}>Screen events</p>
           {watching && !found && (
             <button
+              type="button"
               onClick={() => discover(capture.current?.grab())}
               title="Learn this app's fields and buttons from the current frame"
-              className="text-xs font-medium text-sky-700 hover:underline dark:text-sky-300"
+              className={`${link} text-meta font-medium`}
             >
               Learn this app
             </button>
           )}
         </div>
         {events.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
-            Events appear here as ExpertAI notices changes.
-          </p>
+          <div className={emptyBox}>
+            <p className="text-body font-medium text-ink">No screen events yet</p>
+            <p className="mt-1 text-meta text-ink-secondary">
+              {watching ? "Events appear here as ExpertAI notices changes on the shared screen." : "Start watching to share your screen; changes show up here."}
+            </p>
+          </div>
         ) : (
           <ol className="space-y-2">
             {events
@@ -306,20 +344,18 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
         )}
 
         {map && map.rules.length > 0 && (
-          <section className="pt-6">
-            <div className="flex items-center justify-between pb-3">
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                Learned rules · {map.rules.length}
-              </p>
-              <Link href={`/workmap?job=${jobId}`} className="text-xs font-medium text-sky-700 hover:underline dark:text-sky-300">
-                Open Work Map →
+          <section className="pt-6" aria-label="Learned rules">
+            <div className="flex items-center justify-between gap-3 pb-3">
+              <p className={eyebrow}>Learned rules · {map.rules.length}</p>
+              <Link href={`/workmap?job=${jobId}`} className={`${link} text-meta font-medium`}>
+                Open Work Map
               </Link>
             </div>
             <ol className="space-y-2">
               {map.rules.map((r) => (
-                <li key={r.id} className="rounded-xl bg-teal-50/70 px-3 py-2.5 text-sm dark:bg-teal-500/10">
-                  <p className="font-medium text-teal-900 dark:text-teal-200">{r.text}</p>
-                  <p className="mt-1 text-xs italic text-slate-500">&ldquo;{r.reason_quote}&rdquo;</p>
+                <li key={r.id} className="rounded-md bg-surface-subtle px-3.5 py-2.5 text-body">
+                  <p className="font-medium text-ink">{r.text}</p>
+                  <p className="mt-1 text-meta text-ink-secondary">&ldquo;{r.reason_quote}&rdquo;</p>
                 </li>
               ))}
             </ol>
@@ -327,29 +363,31 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
         )}
 
         {agent.transcript.length > 0 && (
-          <>
-            <p className="pb-3 pt-6 text-xs font-medium uppercase tracking-wider text-slate-500">Conversation</p>
+          <section className="pt-6" aria-label="Conversation">
+            <div className="flex items-center justify-between gap-3 pb-3">
+              <p className={eyebrow}>Conversation</p>
+              <span className="text-note text-ink-tertiary">ExpertAI lines are generated</span>
+            </div>
             <ol className="space-y-2">
               {agent.transcript.slice(-8).map((l, i) => (
                 <li
                   key={i}
-                  className={`rounded-xl px-3 py-2 text-sm ${
-                    l.speaker === "agent"
-                      ? "bg-indigo-50 text-indigo-900 dark:bg-indigo-500/10 dark:text-indigo-200"
-                      : "bg-slate-50 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                  className={`rounded-md px-3.5 py-2.5 text-body ${
+                    l.speaker === "agent" ? "bg-info-surface text-ink" : "bg-surface-subtle text-ink"
                   }`}
                 >
-                  <span className="mr-1 text-xs font-medium uppercase text-slate-500">
+                  <span className="mr-2 text-note font-medium uppercase tracking-wider text-ink-secondary">
                     {l.speaker === "agent" ? "ExpertAI" : l.speaker.replace("_", " ")}
                   </span>
                   {l.text}
                 </li>
               ))}
             </ol>
-          </>
+          </section>
         )}
       </div>
 
+      {/* ---- footer ---- */}
       {connected && <SayBox onSay={agent.say} />}
     </aside>
   );
@@ -360,7 +398,7 @@ function useBriefing(jobId: string): string | null {
   const [briefing, setBriefing] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/briefing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ job_id: jobId }) })
+    fetch("/api/briefing", { method: "POST", headers: { "content-type": "application/json", ...auditHeaders() }, body: JSON.stringify({ job_id: jobId }) })
       .then((r) => (r.ok ? r.json() : null))
       .then((b: { briefing?: string } | null) => {
         if (!cancelled && b?.briefing) setBriefing(b.briefing);
@@ -377,6 +415,39 @@ const EMPTY_EVENTS: ScreenEvent[] = [];
 const noEvents = () => EMPTY_EVENTS;
 const emptyMap = (job_id: string, expert: string) => ({ job_id, expert, steps: [], rules: [], open_gaps: [] });
 
+/** Browser refused getDisplayMedia / getUserMedia (24.1 denied state). Presentation only. */
+export const isPermissionDenied = (msg: string) => /notallowed|permission|denied|not allowed|dismissed/i.test(msg);
+
+/** Gate indicator: breathes (scale 1 -> 1.15 -> 1, 1.8s) only while the gate is open; static otherwise and under reduced motion. */
+function GateDot({ open }: { open: boolean }) {
+  const reduce = useReducedMotion();
+  const breathe = open && !reduce;
+  return (
+    <motion.span
+      aria-hidden
+      className="size-1.5 rounded-full bg-current"
+      animate={breathe ? { scale: [1, 1.15, 1] } : { scale: 1 }}
+      transition={breathe ? { duration: 1.8, repeat: Infinity, ease: "easeInOut" } : { duration: 0 }}
+    />
+  );
+}
+
+/** Session clock for the recording indicator (24.1): tabular, fixed width so controls do not shift. */
+function Elapsed({ running }: { running: boolean }) {
+  const [t, setT] = useState(() => sessionT());
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setT(sessionT()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  return <span className="inline-block min-w-[4ch] tabular-nums">{formatT(t)}</span>;
+}
+
+const formatT = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
 const PHASES = [
   { key: "asking", label: "Questions" },
   { key: "teach_back", label: "Teach-back" },
@@ -388,62 +459,57 @@ function DebriefCard({ agent, jobId, map }: { agent: ApprenticeAgent; jobId: str
   const current = agent.debriefPlan[agent.debriefIndex];
 
   return (
-    <section className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-      <ol className="flex items-center gap-2 text-xs">
+    <section aria-label="Debrief" className="mb-6 rounded-lg border border-line bg-surface-subtle p-4">
+      <ol className="flex flex-wrap items-center gap-2 text-note" aria-label="Debrief progress">
         {PHASES.map((p, i) => (
           <li key={p.key} className="flex items-center gap-2">
             <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                i < phaseIndex
-                  ? "bg-teal-100 text-teal-800 dark:bg-teal-500/15 dark:text-teal-300"
-                  : i === phaseIndex
-                    ? "bg-indigo-600 text-white"
-                    : "bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-              }`}
+              aria-current={i === phaseIndex ? "step" : undefined}
+              className={
+                i < phaseIndex ? pill.success : i === phaseIndex ? `${pill.selected} bg-action text-on-action` : pill.outline
+              }
             >
-              {p.label}
+              {i < phaseIndex ? `${p.label} · done` : p.label}
             </span>
-            {i < PHASES.length - 1 && <span className="text-slate-300 dark:text-slate-600">›</span>}
+            {i < PHASES.length - 1 && <span aria-hidden className="text-ink-tertiary">›</span>}
           </li>
         ))}
       </ol>
 
       {agent.debrief === "asking" && current && (
         <div className="mt-4">
-          <p className="text-xs text-slate-500">
+          <p className="text-meta text-ink-secondary">
             Question {agent.debriefIndex + 1} of {agent.debriefPlan.length}
-            {current.is_guardrail && <span className="ml-2 font-medium text-amber-700 dark:text-amber-300">guardrail</span>}
+            {current.is_guardrail && <span className={`${pill.warning} ml-2`}>guardrail</span>}
           </p>
-          <p className="mt-1 text-sm font-medium text-indigo-950 dark:text-indigo-100">{current.question}</p>
-          <button
-            onClick={agent.nextDebriefQuestion}
-            className="mt-3 text-xs font-medium text-indigo-700 hover:underline dark:text-indigo-300"
-          >
-            Skip to next →
+          <p className="mt-1 text-body font-medium text-ink">{current.question}</p>
+          <button type="button" onClick={agent.nextDebriefQuestion} className={`${btn.tertiary} ${btn.compact} mt-2 -ml-3`}>
+            Skip to next question
           </button>
         </div>
       )}
 
       {agent.debrief === "teach_back" && (
         <div className="mt-4">
-          <p className="text-xs text-slate-500">ExpertAI explains it back. Say &ldquo;yes&rdquo; to confirm, or correct it.</p>
+          <p className="text-meta text-ink-secondary">ExpertAI explains it back. Say &ldquo;yes&rdquo; to confirm, or correct it.</p>
           {agent.teachBack ? (
-            <p className="mt-2 rounded-xl bg-white px-3 py-2.5 text-sm leading-relaxed text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+            <p className="mt-2 rounded-md bg-surface px-3.5 py-2.5 text-body leading-relaxed text-ink">
+              <span className="mr-2 text-note font-medium uppercase tracking-wider text-ink-secondary">Generated summary</span>
               {agent.teachBack}
             </p>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">Listening for the summary…</p>
+            <p className="mt-2 text-body text-ink-secondary" aria-live="polite">Listening for the summary…</p>
           )}
         </div>
       )}
 
       {agent.debrief === "confirmed" && (
         <div className="mt-4">
-          <p className="text-sm font-medium text-teal-800 dark:text-teal-300">
-            {map?.confirmed_at ? "Work Map confirmed. Rules are now enforced in tutor mode." : "Confirming the Work Map…"}
+          <p className="text-body font-medium text-success-ink">
+            {map?.confirmed_at ? "Work Map confirmed. Rules are now enforced in new-hire mode." : "Confirming the Work Map…"}
           </p>
-          <Link href={`/workmap?job=${jobId}`} className="mt-2 inline-block text-sm font-medium text-sky-700 hover:underline dark:text-sky-300">
-            Open Work Map →
+          <Link href={`/workmap?job=${jobId}`} className={`${link} mt-2 inline-block text-body font-medium`}>
+            Open Work Map
           </Link>
         </div>
       )}
@@ -462,15 +528,20 @@ function SayBox({ onSay }: { onSay: (text: string) => void }) {
         onSay(text.trim());
         setText("");
       }}
-      className="flex gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-800"
+      className="flex items-end gap-2 border-t border-line px-4 py-3"
     >
+      <label htmlFor="expert-say" className="sr-only">
+        Type instead of talking
+      </label>
       <input
+        id="expert-say"
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Type instead of talking…"
-        className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+        autoComplete="off"
+        className={`${field} min-w-0 flex-1`}
       />
-      <button className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+      <button type="submit" className={btn.secondary} disabled={!text.trim()}>
         Send
       </button>
     </form>
@@ -479,18 +550,18 @@ function SayBox({ onSay }: { onSay: (text: string) => void }) {
 
 export function EventRow({ e }: { e: ScreenEvent }) {
   return (
-    <li className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm dark:bg-slate-800/60">
+    <li className="rounded-md bg-surface-subtle px-3.5 py-2.5 text-body">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-sky-700 dark:text-sky-300">{e.type.replace(/_/g, " ")}</span>
-        <span className="text-xs tabular-nums text-slate-500">{(e.t / 1000).toFixed(1)}s</span>
+        <span className="font-medium text-ink">{e.type.replace(/_/g, " ")}</span>
+        <span className="text-meta tabular-nums text-ink-tertiary">{(e.t / 1000).toFixed(1)}s</span>
       </div>
       {e.field && (
-        <p className="mt-1 text-slate-700 dark:text-slate-200">
-          {e.field}: <span className="text-slate-500">{String(e.from ?? "—")}</span> →{" "}
+        <p className="mt-1 text-ink">
+          {e.field}: <span className="text-ink-secondary">{String(e.from ?? "—")}</span> →{" "}
           <span className="font-medium">{String(e.to ?? "—")}</span>
         </p>
       )}
-      <p className="mt-0.5 text-xs text-slate-500">{e.detail}</p>
+      {e.detail && <p className="mt-0.5 text-meta text-ink-secondary">{e.detail}</p>}
     </li>
   );
 }

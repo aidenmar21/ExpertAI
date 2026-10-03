@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import type { JobField, Value } from "@understudy/shared";
 import type { ClientJob, JobRecord } from "@/lib/job";
 import { activity, groundTruth, sessionT } from "@/lib/session";
@@ -15,6 +15,28 @@ interface FakeAppProps {
   /** Shown above the action bar, e.g. the tutor's guardrail notice. */
   notice?: ReactNode;
 }
+
+/*
+ * The simulated job app is deliberately NOT in the ExpertAI style: it stands in for the customer's own
+ * boring internal tool. Neutral zinc palette, thin dark header bar, denser rows, standard inputs.
+ * Field anatomy still follows spec 12 (persistent labels, 16px input text, 44px targets on touch).
+ */
+const tool = {
+  frame: "flex h-full flex-col overflow-hidden rounded-md border border-zinc-300 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100",
+  header: "flex min-h-10 items-center justify-between gap-3 bg-zinc-800 px-4 text-[13px] text-zinc-100 dark:bg-zinc-950",
+  nav: "w-full shrink-0 overflow-y-auto border-b border-zinc-200 bg-zinc-50 p-2 sm:w-48 sm:border-r sm:border-b-0 dark:border-zinc-700 dark:bg-zinc-900",
+  row: "block w-full rounded-sm px-2.5 py-1.5 text-left text-[13px] leading-5 transition-colors duration-150",
+  rowOn: "bg-zinc-200 text-zinc-900 dark:bg-zinc-700 dark:text-zinc-50",
+  rowOff: "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800",
+  label: "mb-1 block text-[13px] font-medium leading-4 text-zinc-700 dark:text-zinc-300",
+  input:
+    "block w-full min-h-11 rounded-sm border border-zinc-400 bg-white px-2.5 py-1.5 text-base leading-6 text-zinc-900 outline-none transition-[border-color,box-shadow] duration-150 focus:border-zinc-700 focus:ring-2 focus:ring-zinc-400/40 pointer-fine:min-h-9 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-zinc-300",
+  readonly: "block min-h-11 rounded-sm border border-zinc-200 bg-zinc-100 px-2.5 py-1.5 text-base leading-6 text-zinc-700 pointer-fine:min-h-9 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+  btn: "inline-flex min-h-11 items-center justify-center rounded-sm border px-3.5 text-[13px] font-medium transition-colors duration-150 pointer-fine:min-h-9",
+  btnPrimary: "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 active:bg-zinc-700 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-white",
+  btnPlain: "border-zinc-400 bg-white text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800",
+  status: "inline-flex items-center rounded-sm border border-zinc-300 bg-zinc-100 px-2 py-0.5 text-[12px] font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200",
+};
 
 /** Renders any job profile from its fields and actions. No per-job code. */
 export default function FakeApp({ profile, mode = "expert", beforeAction, notice }: FakeAppProps) {
@@ -48,38 +70,34 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
   }
 
   return (
-    <section className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-sky-600 dark:text-sky-400">{job.category}</p>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50">{job.name}</h1>
+    <section aria-label={`${job.name} (simulated app)`} className={tool.frame}>
+      <header className={tool.header}>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="truncate font-semibold">{job.name}</span>
+          <span className="hidden text-zinc-400 sm:inline">{job.category}</span>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          Business date {job.business_date}
-        </span>
+        <span className="shrink-0 text-zinc-300">Business date {job.business_date}</span>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <nav className="w-52 shrink-0 overflow-y-auto border-r border-slate-200 p-3 dark:border-slate-800">
-          <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wider text-slate-500">
-            {capitalize(screen.record_type)} queue
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <nav aria-label={`${capitalize(screen.record_type)} queue`} className={`${tool.nav} max-h-40 sm:max-h-none sm:w-48`}>
+          <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            {capitalize(screen.record_type)} queue ({records.length})
           </p>
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {records.map((r, i) => (
               <li key={i}>
                 <button
+                  type="button"
+                  aria-current={i === current ? "true" : undefined}
                   onClick={() => {
                     setCurrent(i);
                     activity.recordOpened(sessionT());
                   }}
-                  className={`w-full rounded-xl px-3 py-2 text-left text-sm transition ${
-                    i === current
-                      ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
-                      : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                  }`}
+                  className={`${tool.row} ${i === current ? tool.rowOn : tool.rowOff}`}
                 >
                   <span className="block font-medium">{recordId(r, i)}</span>
-                  {statusField && <span className="block text-xs text-slate-500">{String(r[statusField.key] ?? "")}</span>}
+                  {statusField && <span className="block text-[12px] text-zinc-500 dark:text-zinc-400">{String(r[statusField.key] ?? "")}</span>}
                 </button>
               </li>
             ))}
@@ -87,9 +105,9 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
         </nav>
 
         {rec ? (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-center justify-between px-6 pt-5">
-              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">
+          <div className="@container flex min-w-0 flex-1 flex-col">
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+              <h2 className="text-[15px] font-semibold leading-5">
                 {capitalize(screen.record_type)} {recordId(rec, current)}
               </h2>
               {statusField && <StatusBadge value={rec[statusField.key]} />}
@@ -98,7 +116,7 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
             <form
               key={current}
               onSubmit={(e) => e.preventDefault()}
-              className="grid flex-1 grid-cols-1 content-start gap-x-6 gap-y-5 overflow-y-auto px-6 py-5 sm:grid-cols-2"
+              className="grid flex-1 grid-cols-1 content-start gap-x-4 gap-y-3 overflow-y-auto px-4 py-3 @lg:grid-cols-2"
             >
               {screen.fields
                 .filter((f) => f.type !== "status")
@@ -108,18 +126,15 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
             </form>
 
             {notice}
-            <footer className="flex flex-wrap gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-800">
+            <footer className="flex flex-wrap gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-900">
               {screen.actions.map((a, i) => (
                 <button
                   key={a.key}
+                  type="button"
                   onClick={() => runAction(a.key, a.sets)}
                   onPointerEnter={() => activity.hover(a.key)}
                   onPointerLeave={() => activity.hover(null)}
-                  className={
-                    i === 0
-                      ? "rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500"
-                      : "rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  }
+                  className={`${tool.btn} ${i === 0 ? tool.btnPrimary : tool.btnPlain}`}
                 >
                   {a.label}
                 </button>
@@ -127,7 +142,10 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
             </footer>
           </div>
         ) : (
-          <p className="m-auto text-sm text-slate-500">No records in this job profile.</p>
+          <div className="m-auto px-6 py-10 text-center">
+            <p className="text-[15px] font-medium">No records in this queue</p>
+            <p className="mt-1 text-[13px] text-zinc-500 dark:text-zinc-400">This job profile has no sample records for this mode.</p>
+          </div>
         )}
       </div>
     </section>
@@ -135,24 +153,27 @@ export default function FakeApp({ profile, mode = "expert", beforeAction, notice
 }
 
 function Field({ field, value, onCommit }: { field: JobField; value: Value; onCommit: (v: Value) => void }) {
+  const id = useId();
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const readonly = (field as JobField & { readonly?: boolean }).readonly === true;
   const focusValue = useRef(draft);
-  const input =
-    "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 
   const parse = (s: string): Value => (s === "" ? null : field.type === "money" ? Number(s) : s);
 
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">{field.label}</span>
+    <div>
+      <label htmlFor={id} className={tool.label}>
+        {field.label}
+        {readonly && <span className="ml-1 font-normal text-zinc-500">(read only)</span>}
+      </label>
       {readonly ? (
-        <p className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <p id={id} className={tool.readonly}>
           {value == null || value === "" ? "—" : String(value)}
         </p>
       ) : field.type === "select" ? (
         <select
-          className={input}
+          id={id}
+          className={tool.input}
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -168,25 +189,24 @@ function Field({ field, value, onCommit }: { field: JobField; value: Value; onCo
         </select>
       ) : (
         <input
-          className={input}
+          id={id}
+          className={tool.input}
           type={field.type === "money" ? "number" : field.type === "date" ? "date" : "text"}
+          inputMode={field.type === "money" ? "decimal" : undefined}
           step={field.type === "money" ? "0.01" : undefined}
+          autoComplete="off"
           value={draft}
           onFocus={() => (focusValue.current = draft)}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => draft !== focusValue.current && onCommit(parse(draft))}
         />
       )}
-    </label>
+    </div>
   );
 }
 
 function StatusBadge({ value }: { value: Value }) {
-  return (
-    <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-700 ring-1 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/30">
-      {value ?? "—"}
-    </span>
-  );
+  return <span className={tool.status}>{value ?? "—"}</span>;
 }
 
 const labelOf = (f?: JobField) => f?.label ?? "id";

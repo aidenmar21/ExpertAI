@@ -1,21 +1,29 @@
 "use client";
 
 import Link from "next/link";
+import { useSyncExternalStore } from "react";
 import { auditUrl } from "@/lib/audit";
 
+const noSubscribe = () => () => {};
+// The session id lives in sessionStorage, so the server renders the plain route and the client swaps in
+// the session URL after hydration (no attribute mismatch).
+const serverHref = () => "/audit";
+const clientHref = () => auditUrl();
+
 /**
- * Quiet footer link to the audit log for the current browser session.
- * Place it at the bottom of a page or panel: <AuditLink />
+ * Quiet text link to the audit log for the current browser session.
+ * Used at the far right of the top nav; also fine at the bottom of a page or panel: <AuditLink />
  */
 export default function AuditLink({ className = "" }: { className?: string }) {
+  const href = useSyncExternalStore(noSubscribe, clientHref, serverHref);
   return (
-    <footer className={`flex items-center justify-end px-4 py-3 ${className}`}>
+    <div className={`flex items-center justify-end ${className}`}>
       <Link
-        href={auditUrl()}
-        className="text-xs text-slate-400 underline-offset-4 transition hover:text-sky-600 hover:underline dark:text-slate-500 dark:hover:text-sky-300"
+        href={href}
+        className="inline-flex min-h-11 items-center rounded-sm px-2 text-meta text-ink-secondary no-underline underline-offset-[0.15em] transition-colors duration-150 ease-ui hover:text-link hover:underline pointer-fine:min-h-9"
       >
-        Audit log
+        Audit
       </Link>
-    </footer>
+    </div>
   );
 }

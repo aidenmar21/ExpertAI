@@ -1,23 +1,24 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import AuditView from "@/components/AuditView";
+import { PageChrome } from "@/components/JobsDashboard";
 
 export const metadata = { title: "Audit log · ExpertAI" };
 
 export default function AuditPage() {
   return (
-    <>
-      <div className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6">
+    <div className="flex min-h-screen flex-col">
+      <PageChrome>
         <Link
           href="/"
-          className="text-sm text-slate-500 transition hover:text-sky-600 dark:text-slate-400 dark:hover:text-sky-300"
+          className="inline-flex min-h-11 items-center rounded-sm px-2 text-meta text-ink-secondary no-underline hover:text-link hover:underline pointer-fine:min-h-9"
         >
-          &larr; Back to ExpertAI
+          Back to ExpertAI
         </Link>
-      </div>
-      <Suspense fallback={<p className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>}>
+      </PageChrome>
+      <Suspense fallback={<p className="px-6 py-12 text-center text-body text-ink-secondary" role="status">Loading audit log…</p>}>
         <AuditView />
       </Suspense>
-    </>
+    </div>
   );
 }

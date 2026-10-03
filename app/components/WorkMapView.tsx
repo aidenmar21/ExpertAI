@@ -1,19 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Condition, Rule, RuleType, WorkMap } from "@understudy/shared";
 import { differsFromStandard, useWorkMap, workMaps } from "@/lib/workmap";
 import KnowledgeBox from "@/components/KnowledgeBox";
 import { sessionStats } from "@/lib/stats";
 import Scoreboard from "@/components/Scoreboard";
+import { btn, card, emptyBox, eyebrow, link, page, pill } from "@/components/ui/styles";
 
+/** Rule-type chips: semantic pairs only (danger / warning / info / neutral / success). */
 const TYPE_STYLE: Record<RuleType, string> = {
-  guardrail: "bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30",
-  limit: "bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/30",
-  stop_and_ask: "bg-indigo-50 text-indigo-700 ring-indigo-600/20 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-400/30",
-  exception: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/30",
-  judgment: "bg-teal-50 text-teal-700 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/30",
+  guardrail: pill.danger,
+  limit: pill.warning,
+  stop_and_ask: pill.info,
+  exception: pill.neutral,
+  judgment: pill.success,
 };
 
 const OP_WORDS: Record<Condition["op"], string> = {
@@ -31,66 +34,64 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
   const gaps = stats.offRecord;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 pb-10 pt-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link href={`/?job=${jobId}`} className="text-sm font-medium text-sky-700 hover:underline dark:text-sky-300">
-            ← Back to {jobName}
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">Work Map</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {jobName}
-            {map?.expert ? ` · learned from ${map.expert}` : ""}
+    <main className={`${page} pb-16 pt-8`}>
+      {/* ---- header ---- */}
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className={eyebrow}>{jobName}{map?.expert ? ` · learned from ${map.expert}` : ""}</p>
+          <h1 className="mt-1 text-page text-ink">Work Map</h1>
+          <p className="mt-2 max-w-[65ch] text-reading text-ink-secondary">
+            {map
+              ? `At your company, ${differs} rule${differs === 1 ? "" : "s"} differ${differs === 1 ? "s" : ""} from the industry standard.`
+              : "Rules in the expert's own words, with the screen moment each one came from."}
           </p>
-          {map && (
-            <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-              At your company, {differs} rule{differs === 1 ? "" : "s"} differ{differs === 1 ? "s" : ""} from the industry standard.
-            </p>
-          )}
         </div>
         {map && (
-          <div className="flex items-center gap-3">
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${
-                map.confirmed_at
-                  ? "bg-teal-50 text-teal-700 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/30"
-                  : "bg-slate-100 text-slate-600 ring-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700"
-              }`}
-            >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={map.confirmed_at ? pill.success : pill.outline}>
               {map.confirmed_at ? `Confirmed ${new Date(map.confirmed_at).toLocaleTimeString()}` : "Not confirmed yet"}
             </span>
             <button
-              onClick={() => confirm("Clear this Work Map?") && workMaps.set(jobId, null)}
-              className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              type="button"
+              onClick={() => confirm("Clear this Work Map? Every learned rule and step for this job will be removed.") && workMaps.set(jobId, null)}
+              className={`${btn.dangerQuiet} ${btn.compact}`}
             >
-              Clear
+              Clear Work Map
             </button>
           </div>
         )}
-      </div>
+      </header>
 
       {!map ? (
-        <p className="mt-10 rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500 dark:border-slate-700">
-          No Work Map yet. Start an expert session on the job screen, explain a few decisions, then finish with a debrief.
-        </p>
+        <div className={`${emptyBox} mt-10 py-12`}>
+          <p className="text-sub text-ink">No Work Map yet</p>
+          <p className="mx-auto mt-2 max-w-[48ch] text-body text-ink-secondary">
+            Start an expert session on the job screen, explain a few decisions, then finish with a debrief. The map appears here.
+          </p>
+          <Link href={`/?job=${jobId}`} className={`${btn.primary} mt-5 no-underline`}>
+            Open expert mode
+          </Link>
+        </div>
       ) : (
         <>
-          <dl className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {/* ---- stat tiles, one row ---- */}
+          <dl className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat label="Steps" value={map.steps.length} />
             <Stat label="Company rules" value={company.length} />
             <Stat label="Industry standard" value={standard.length} />
-            <Stat label="Open gaps" value={map.open_gaps.length} />
+            <Stat label="Open gaps" value={map.open_gaps.length} tone={map.open_gaps.length > 0 ? "warn" : "ok"} />
           </dl>
 
           <Scoreboard jobId={jobId} map={map} />
 
-          <div className="mt-10 grid gap-10 lg:grid-cols-5">
-            <section className="lg:col-span-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Timeline</h2>
-              {map.steps.length === 0 ? (
-                <p className="mt-4 text-sm text-slate-500">No steps captured.</p>
+          {/* ---- two columns: timeline | rules ---- */}
+          <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <section aria-labelledby="timeline-title" className="min-w-0">
+              <h2 id="timeline-title" className={eyebrow}>Timeline</h2>
+              {map.steps.length === 0 && gaps.length === 0 ? (
+                <p className="mt-4 text-body text-ink-secondary">No steps captured in this session.</p>
               ) : (
-                <ol className="relative mt-4 space-y-6 border-l border-slate-200 pl-6 dark:border-slate-800">
+                <ol className="relative mt-5 space-y-6 border-l border-line pl-7">
                   {timeline(map.steps, gaps).map((item) =>
                     item.kind === "gap" ? (
                       <OffRecordGap key={`gap-${item.start}`} start={item.start} end={item.end} />
@@ -101,15 +102,13 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
                 </ol>
               )}
             </section>
-            {/* step markup lives in StepItem below */}
-            
 
-            <section className="lg:col-span-3">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Rules, in the expert&rsquo;s words</h2>
+            <section aria-labelledby="rules-title" className="min-w-0">
+              <h2 id="rules-title" className={eyebrow}>Rules, in the expert&rsquo;s words</h2>
               {company.length === 0 ? (
-                <p className="mt-4 text-sm text-slate-500">No company rules yet. Run an expert session, or write company knowledge below.</p>
+                <p className="mt-4 text-body text-ink-secondary">No company rules yet. Run an expert session, or write company knowledge below.</p>
               ) : (
-                <ul className="mt-4 space-y-4">
+                <ul className="mt-5 space-y-3">
                   {company.map((r) => (
                     <RuleCard key={r.id} rule={r} matchesStandard={matchesStandard.has(r.id)} />
                   ))}
@@ -118,10 +117,8 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
 
               {standard.length > 0 && (
                 <>
-                  <h2 className="mt-10 text-xs font-medium uppercase tracking-wider text-slate-500">
-                    Industry standard · confirm or override
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h2 className={`${eyebrow} mt-10`}>Industry standard · confirm or override</h2>
+                  <p className="mt-1 max-w-[65ch] text-meta text-ink-secondary">
                     What ExpertAI already knew about this role. Each one flips to a company rule when the expert confirms it, or is replaced when they do it differently.
                   </p>
                   <ul className="mt-4 space-y-3">
@@ -132,17 +129,12 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
                 </>
               )}
 
-              <KnowledgeBox jobId={jobId} />
-
               {map.open_gaps.length > 0 && (
                 <>
-                  <h2 className="mt-10 text-xs font-medium uppercase tracking-wider text-slate-500">Still unexplained</h2>
+                  <h2 className={`${eyebrow} mt-10`}>Still unexplained</h2>
                   <ul className="mt-4 space-y-2">
                     {map.open_gaps.map((g) => (
-                      <li
-                        key={g.id}
-                        className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300"
-                      >
+                      <li key={g.id} className="rounded-md border border-dashed border-line px-4 py-3 text-body text-ink">
                         {g.question}
                       </li>
                     ))}
@@ -151,13 +143,23 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
               )}
             </section>
           </div>
+
+          <KnowledgeBox jobId={jobId} />
         </>
       )}
     </main>
   );
 }
 
+/**
+ * Collapsed by default: type chip, rule text, confirmed state. Click expands to the quote, when/then,
+ * the screen moment and a thumbnail placeholder. Company rules sit on an accent-tinted hairline with the
+ * quote in the link colour; baseline rules are muted on a dashed hairline; overridden standard text is struck.
+ */
 function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overriddenBy?: Rule; matchesStandard?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const reduce = useReducedMotion();
+  const bodyId = useId();
   const baseline = rule.source === "baseline" && !rule.confirmed;
   const overridden = baseline && !!rule.overridden_by;
   const then = [
@@ -166,111 +168,167 @@ function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overrid
     ...(rule.then.must_not_action ?? []).map((a) => `don't ${a.replace(/_/g, " ")}`),
     ...(rule.then.escalate_to ? [`ask ${rule.then.escalate_to}`] : []),
   ];
+  const when = rule.when
+    .map((c) => `${c.field} ${OP_WORDS[c.op]}${c.value == null ? "" : ` ${Array.isArray(c.value) ? c.value.join(", ") : c.value}`}`)
+    .join(" and ");
+
   return (
     <li
       className={
         baseline
-          ? `rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 dark:border-slate-700 dark:bg-slate-900/40 ${overridden ? "opacity-70" : ""}`
-          : "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          ? "rounded-lg border border-dashed border-line bg-surface-subtle/60"
+          : "rounded-lg border border-action/30 bg-surface"
       }
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${TYPE_STYLE[rule.type]}`}>
-          {rule.type.replace(/_/g, " ")}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start gap-3 rounded-lg px-5 py-4 text-left transition-colors duration-150 ease-ui hover:bg-surface-hover/60"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className={TYPE_STYLE[rule.type]}>{rule.type.replace(/_/g, " ")}</span>
+            {baseline && (
+              <span className={pill.neutral}>{overridden ? "overridden at your company" : "industry standard · unconfirmed"}</span>
+            )}
+            {rule.source === "policy" && <span className={pill.info}>written</span>}
+            {((rule.source === "baseline" && rule.confirmed) || matchesStandard) && <span className={pill.success}>matches the standard</span>}
+            {rule.confirmed && <span className={pill.success}>Confirmed</span>}
+          </span>
+          <span className={`mt-2 block text-body font-medium ${baseline ? "text-ink-secondary" : "text-ink"} ${overridden ? "line-through decoration-ink-tertiary" : ""}`}>
+            {rule.text}
+          </span>
+          {overridden && (
+            <span className="mt-1 block text-meta text-ink-secondary">
+              Here instead:{" "}
+              <span className="font-medium text-ink">
+                {overriddenBy ? overriddenBy.text : rule.override_quote ? `“${rule.override_quote}”` : "the expert does it differently"}
+              </span>
+            </span>
+          )}
         </span>
-        {baseline && (
-          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {overridden ? "overridden at your company" : "industry standard · unconfirmed"}
-          </span>
+        <Chevron open={open} />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            id={bodyId}
+            key="body"
+            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            animate={reduce ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-line px-5 pb-5 pt-4">
+              <blockquote
+                className={`border-l-2 pl-3 text-body italic ${baseline ? "border-line text-ink-secondary" : "border-action text-link"}`}
+              >
+                &ldquo;{rule.reason_quote}&rdquo;
+              </blockquote>
+              <dl className="mt-4 grid gap-1.5 text-meta text-ink-secondary">
+                {when && (
+                  <div>
+                    <dt className="inline font-medium text-ink">When </dt>
+                    <dd className="inline">{when}</dd>
+                  </div>
+                )}
+                {then.length > 0 && (
+                  <div>
+                    <dt className="inline font-medium text-ink">Then </dt>
+                    <dd className="inline">{then.join("; ")}</dd>
+                  </div>
+                )}
+              </dl>
+              <div className="mt-4 flex items-center gap-3">
+                <Thumb t={rule.screen_moment.t} />
+                <div className="text-meta text-ink-secondary">
+                  <p className="font-medium text-ink">Screen moment</p>
+                  <p className="tabular-nums">
+                    {formatT(rule.screen_moment.t)}
+                    {rule.screen_moment.record ? ` · ${rule.screen_moment.record}` : ""}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
         )}
-        {rule.source === "policy" && (
-          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
-            written
-          </span>
-        )}
-        {((rule.source === "baseline" && rule.confirmed) || matchesStandard) && (
-          <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
-            matches the standard
-          </span>
-        )}
-        {rule.confirmed && <span className="text-xs font-medium text-teal-700 dark:text-teal-300">✓ confirmed</span>}
-        <span className="ml-auto text-xs tabular-nums text-slate-500">
-          {formatT(rule.screen_moment.t)}
-          {rule.screen_moment.record ? ` · ${rule.screen_moment.record}` : ""}
-        </span>
-      </div>
-      <p className="mt-3 font-medium text-slate-900 dark:text-slate-100">{rule.text}</p>
-      <blockquote className={`mt-2 border-l-2 pl-3 text-sm italic ${baseline ? "border-slate-300 text-slate-500 dark:border-slate-600" : "border-sky-400 text-slate-600 dark:text-slate-300"}`}>
-        &ldquo;{rule.reason_quote}&rdquo;
-      </blockquote>
-      {overridden && (
-        <p className="mt-2 text-xs text-slate-500">
-          Here instead:{" "}
-          <span className="font-medium text-slate-700 dark:text-slate-200">
-            {overriddenBy ? overriddenBy.text : rule.override_quote ? `“${rule.override_quote}”` : "the expert does it differently"}
-          </span>
-        </p>
-      )}
-      <dl className="mt-3 grid gap-1 text-xs text-slate-500">
-        {rule.when.length > 0 && (
-          <div>
-            <dt className="inline font-medium text-slate-600 dark:text-slate-400">When </dt>
-            <dd className="inline">
-              {rule.when
-                .map((c) => `${c.field} ${OP_WORDS[c.op]}${c.value == null ? "" : ` ${Array.isArray(c.value) ? c.value.join(", ") : c.value}`}`)
-                .join(" and ")}
-            </dd>
-          </div>
-        )}
-        {then.length > 0 && (
-          <div>
-            <dt className="inline font-medium text-slate-600 dark:text-slate-400">Then </dt>
-            <dd className="inline">{then.join("; ")}</dd>
-          </div>
-        )}
-      </dl>
+      </AnimatePresence>
     </li>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Chevron({ open }: { open: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">{value}</dd>
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={`mt-1 size-4 shrink-0 text-ink-tertiary transition-transform duration-150 ease-ui ${open ? "rotate-180" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+/** 96x60 placeholder until real frame thumbnails land; labelled with the time so it is not an empty box. */
+function Thumb({ t }: { t: number }) {
+  return (
+    <div
+      aria-hidden
+      className="flex h-[60px] w-24 shrink-0 items-end justify-end rounded-sm border border-line bg-surface-subtle p-1.5"
+    >
+      <span className="rounded-xs bg-surface px-1 text-note tabular-nums text-ink-tertiary">{formatT(t)}</span>
     </div>
   );
 }
 
+function Stat({ label, value, tone = "ok" }: { label: string; value: number; tone?: "ok" | "warn" }) {
+  return (
+    <div className={`${card} min-w-0 px-5 py-4`}>
+      <dt className="text-meta text-ink-secondary">{label}</dt>
+      <dd className={`mt-1 text-metric tabular-nums ${tone === "warn" ? "text-warning-ink" : "text-ink"}`}>{value}</dd>
+    </div>
+  );
+}
 
 function StepItem({ s }: { s: WorkMap["steps"][number] }) {
   return (
     <li className="relative">
-                      <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-sky-500 ring-4 ring-slate-100 dark:ring-slate-950" />
-                      <p className="text-xs tabular-nums text-slate-500">
-                        {formatT(s.screen_moment.t)}
-                        {s.screen_moment.record ? ` · ${s.screen_moment.record}` : ""}
-                      </p>
-                      <p className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">{s.title}</p>
-                      <p className="text-sm text-slate-600 dark:text-slate-300">{s.decision}</p>
-                      {s.rule_ids.length > 0 && (
-                        <p className="mt-1 text-xs text-teal-700 dark:text-teal-300">
-                          {s.rule_ids.length} rule{s.rule_ids.length > 1 ? "s" : ""} learned here
-                        </p>
-                      )}
-                    </li>
+      <span aria-hidden className="absolute -left-[33px] top-1.5 size-3 rounded-full border-2 border-canvas bg-action" />
+      <div className="flex gap-4">
+        <Thumb t={s.screen_moment.t} />
+        <div className="min-w-0">
+          <p className="text-meta tabular-nums text-ink-tertiary">
+            {formatT(s.screen_moment.t)}
+            {s.screen_moment.record ? ` · ${s.screen_moment.record}` : ""}
+          </p>
+          <p className="mt-0.5 text-body font-medium text-ink">{s.title}</p>
+          <p className="text-body text-ink-secondary">{s.decision}</p>
+          {s.rule_ids.length > 0 && (
+            <p className="mt-1 text-meta text-success-ink">
+              {s.rule_ids.length} rule{s.rule_ids.length > 1 ? "s" : ""} learned here
+            </p>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }
 
 function OffRecordGap({ start, end }: { start: number; end: number | null }) {
   return (
     <li className="relative">
-      <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-400 ring-4 ring-slate-100 dark:ring-slate-950" />
-      <div
-        className="rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/30 dark:text-rose-300"
-        style={{ backgroundImage: "repeating-linear-gradient(135deg, rgba(244,63,94,0.14) 0 6px, transparent 6px 12px)" }}
-      >
-        Off the record · {formatT(start)}–{end === null ? "now" : formatT(end)}. Nothing from this window was kept.
+      <span aria-hidden className="absolute -left-[33px] top-1.5 size-3 rounded-full border-2 border-canvas bg-danger-ink" />
+      <div className="hatched-danger rounded-md border border-danger-ink/30 px-3.5 py-2.5 text-meta text-danger-ink">
+        <span className="font-medium">Off the record</span> · {formatT(start)}–{end === null ? "now" : formatT(end)}. Nothing from this window was kept.
       </div>
     </li>
   );

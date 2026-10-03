@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { auditSessionId } from "@/lib/audit";
+import { banner, btn, card, eyebrow, field, page, pill } from "@/components/ui/styles";
 
 interface Entry {
   seq: number;
@@ -19,11 +20,12 @@ interface Verify { ok: boolean; broken_at?: number }
 
 const ACTORS = ["expert", "new_hire", "expertai", "system"] as const;
 
+/** Actor chips: who did it, as text with a semantic tint (never colour alone). */
 const actorTone: Record<string, string> = {
-  expert: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300",
-  new_hire: "bg-teal-100 text-teal-800 dark:bg-teal-500/15 dark:text-teal-300",
-  expertai: "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300",
-  system: "bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300",
+  expert: pill.info,
+  new_hire: pill.success,
+  expertai: pill.selected,
+  system: pill.neutral,
 };
 
 const fmtTime = (iso: string) => {
@@ -160,16 +162,18 @@ export default function AuditView() {
     return c;
   }, [entries]);
 
-  const select = "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-500 dark:focus:ring-sky-500/30";
-  const btn = "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-sky-400 hover:text-sky-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-500 dark:hover:text-sky-300";
+  const loading = !!session && loadedFor !== session && entries.length === 0 && !error;
+  const filtered = actor !== "all" || type !== "all";
+  const exportDisabled = !session;
+  const exportBtn = `${btn.secondary} ${btn.compact} no-underline ${exportDisabled ? "pointer-events-none opacity-50" : ""}`;
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+    <main className={`${page} max-w-[90rem] pb-16 pt-8`}>
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">ExpertAI</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Audit log</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
+        <div className="min-w-0">
+          <p className={eyebrow}>ExpertAI</p>
+          <h1 className="mt-1 text-page text-ink">Audit log</h1>
+          <p className="mt-2 max-w-[65ch] text-reading text-ink-secondary">
             Every question, answer, rule, model call, and intervention, in order, hash-chained so nothing can be
             changed or removed without showing. No screen frames, no personal data.
           </p>
@@ -177,11 +181,12 @@ export default function AuditView() {
         <ChainBadge verify={verify} count={entries.length} />
       </header>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-            <span>Session</span>
-            <select className={select} value={session} onChange={(e) => setSession(e.target.value)}>
+      {/* toolbar (11.1): filters near the data, utilities at the trailing edge */}
+      <section aria-label="Filters" className={`${card} mt-6 p-4`}>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-0 flex-1 basis-64">
+            <label htmlFor="audit-session" className="block text-meta font-medium text-ink">Session</label>
+            <select id="audit-session" className={`${field} mt-1.5`} value={session} onChange={(e) => setSession(e.target.value)}>
               {!sessions.some((s) => s.id === session) && session ? <option value={session}>{session}</option> : null}
               {sessions.length === 0 && !session ? <option value="">No sessions yet</option> : null}
               {sessions.map((s) => (
@@ -190,33 +195,33 @@ export default function AuditView() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-            <span>Actor</span>
-            <select className={select} value={actor} onChange={(e) => setActor(e.target.value)}>
+          </div>
+          <div className="basis-40">
+            <label htmlFor="audit-actor" className="block text-meta font-medium text-ink">Actor</label>
+            <select id="audit-actor" className={`${field} mt-1.5`} value={actor} onChange={(e) => setActor(e.target.value)}>
               <option value="all">All ({entries.length})</option>
               {ACTORS.map((a) => (
                 <option key={a} value={a}>{a.replace("_", " ")} ({counts[a] ?? 0})</option>
               ))}
             </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-            <span>Type</span>
-            <select className={select} value={type} onChange={(e) => setType(e.target.value)}>
+          </div>
+          <div className="basis-48">
+            <label htmlFor="audit-type" className="block text-meta font-medium text-ink">Type</label>
+            <select id="audit-type" className={`${field} mt-1.5`} value={type} onChange={(e) => setType(e.target.value)}>
               <option value="all">All types</option>
               {types.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
-          </label>
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button" className={btn} onClick={() => { void loadSessions(); loadEntries(session); }}>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button type="button" className={`${btn.secondary} ${btn.compact}`} onClick={() => { void loadSessions(); loadEntries(session); }}>
               Refresh
             </button>
-            <a className={btn} href={session ? `/api/audit/export?session=${encodeURIComponent(session)}&format=jsonl` : undefined} aria-disabled={!session} download>
+            <a className={exportBtn} href={session ? `/api/audit/export?session=${encodeURIComponent(session)}&format=jsonl` : undefined} aria-disabled={exportDisabled} download>
               Export JSONL
             </a>
-            <a className={btn} href={session ? `/api/audit/export?session=${encodeURIComponent(session)}&format=csv` : undefined} aria-disabled={!session} download>
+            <a className={exportBtn} href={session ? `/api/audit/export?session=${encodeURIComponent(session)}&format=csv` : undefined} aria-disabled={exportDisabled} download>
               Export CSV
             </a>
           </div>
@@ -224,30 +229,55 @@ export default function AuditView() {
       </section>
 
       {error ? (
-        <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>
+        <div role="alert" className={`${banner.danger} mt-4`}>
+          <div>
+            <p className="font-medium">{error}</p>
+            <p className="mt-1 text-meta">Nothing was changed. Choose Refresh to try again.</p>
+          </div>
+        </div>
       ) : null}
 
-      <section className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        {session && loadedFor !== session && entries.length === 0 ? (
-          <p className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+      <section aria-label="Entries" className={`${card} mt-4 overflow-hidden`}>
+        {loading ? (
+          <p className="px-5 py-12 text-center text-body text-ink-secondary" role="status">Loading entries…</p>
         ) : shown.length === 0 ? (
-          <p className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
-            {session ? "Nothing matches these filters." : "Start a session in Expert mode and entries will appear here."}
-          </p>
+          <div className="px-5 py-12 text-center">
+            <p className="text-sub text-ink">{!session ? "No sessions yet" : filtered ? "No matches" : "No entries in this session"}</p>
+            <p className="mx-auto mt-2 max-w-[48ch] text-body text-ink-secondary">
+              {!session
+                ? "Start a session in Expert mode and entries appear here."
+                : filtered
+                  ? "Nothing matches these filters."
+                  : "Entries are appended as the session runs."}
+            </p>
+            {filtered && (
+              <button
+                type="button"
+                className={`${btn.secondary} ${btn.compact} mt-4`}
+                onClick={() => {
+                  setActor("all");
+                  setType("all");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
+            <table className="w-full min-w-[720px] text-left text-body">
+              <caption className="sr-only">Audit entries, {shown.length} shown of {entries.length}</caption>
+              <thead className="bg-surface-subtle text-note font-medium uppercase tracking-wider text-ink-secondary">
                 <tr>
-                  <th className="px-4 py-3 font-medium">#</th>
-                  <th className="px-4 py-3 font-medium">Time</th>
-                  <th className="px-4 py-3 font-medium">Actor</th>
-                  <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">What happened</th>
-                  <th className="px-4 py-3 font-medium">Hash</th>
+                  <th scope="col" className="h-11 px-4 text-right">#</th>
+                  <th scope="col" className="h-11 px-4">Time</th>
+                  <th scope="col" className="h-11 px-4">Actor</th>
+                  <th scope="col" className="h-11 px-4">Type</th>
+                  <th scope="col" className="h-11 px-4">What happened</th>
+                  <th scope="col" className="h-11 px-4">Hash</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-line">
                 {shown.map((e) => {
                   const broken = verify && !verify.ok && verify.broken_at != null && e.seq >= verify.broken_at;
                   return (
@@ -260,8 +290,8 @@ export default function AuditView() {
         )}
       </section>
 
-      <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
-        Stored at <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">data/audit/{session || "<session>"}.jsonl</code>.
+      <p className="mt-4 text-meta text-ink-secondary">
+        Stored at <code className="rounded-xs bg-surface-subtle px-1 py-0.5 font-mono text-code">data/audit/{session || "<session>"}.jsonl</code>.
         Each line&apos;s hash covers its content and the previous hash; verification recomputes the whole chain on every load.
       </p>
     </main>
@@ -271,23 +301,30 @@ export default function AuditView() {
 function Row({ entry: e, broken, open, onToggle }: { entry: Entry; broken: boolean; open: boolean; onToggle: () => void }) {
   return (
     <>
-      <tr
-        onClick={onToggle}
-        className={`cursor-pointer align-top transition hover:bg-slate-50 dark:hover:bg-slate-800/60 ${broken ? "bg-rose-50/70 dark:bg-rose-950/30" : ""}`}
-      >
-        <td className="px-4 py-2.5 tabular-nums text-slate-500 dark:text-slate-400">{e.seq}</td>
-        <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-slate-600 dark:text-slate-300">{fmtTime(e.ts)}</td>
+      <tr className={`align-top ${broken ? "bg-danger-surface/60" : ""}`}>
+        <td className="px-4 py-2.5 text-right tabular-nums text-ink-secondary">{e.seq}</td>
+        <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-ink-secondary">{fmtTime(e.ts)}</td>
         <td className="px-4 py-2.5">
-          <span className={`inline-block rounded-lg px-2 py-0.5 text-xs font-medium ${actorTone[e.actor] ?? actorTone.system}`}>{e.actor.replace("_", " ")}</span>
+          <span className={actorTone[e.actor] ?? actorTone.system}>{e.actor.replace("_", " ")}</span>
         </td>
-        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-700 dark:text-slate-300">{e.type}</td>
-        <td className="max-w-[28rem] truncate px-4 py-2.5 text-slate-800 dark:text-slate-200" title={summarize(e)}>{summarize(e)}</td>
-        <td className="px-4 py-2.5 font-mono text-xs text-slate-400 dark:text-slate-500">{e.hash.slice(0, 10)}</td>
+        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-code text-ink">{e.type}</td>
+        <td className="max-w-[28rem] px-4 py-2.5 text-ink">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            title={summarize(e)}
+            className="block w-full truncate rounded-xs text-left hover:text-link"
+          >
+            {summarize(e)}
+          </button>
+        </td>
+        <td className="px-4 py-2.5 font-mono text-code text-ink-tertiary">{e.hash.slice(0, 10)}</td>
       </tr>
       {open ? (
-        <tr className="bg-slate-50/80 dark:bg-slate-950/50">
+        <tr className="bg-surface-subtle">
           <td colSpan={6} className="px-4 py-3">
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-surface p-3 font-mono text-code text-ink">
               {JSON.stringify({ payload: e.payload, prev_hash: e.prev_hash, hash: e.hash }, null, 2)}
             </pre>
           </td>
@@ -299,17 +336,17 @@ function Row({ entry: e, broken, open, onToggle }: { entry: Entry; broken: boole
 
 function ChainBadge({ verify, count }: { verify: Verify | null; count: number }) {
   if (!verify) {
-    return <span className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">No session loaded</span>;
+    return <span className={pill.outline}>No session loaded</span>;
   }
   return verify.ok ? (
-    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-300">
-      <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+    <span className={pill.success}>
+      <span aria-hidden className="size-1.5 rounded-full bg-current" />
       Chain intact · {count} {count === 1 ? "entry" : "entries"}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-2 rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-300">
-      <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden />
-      Broken at #{verify.broken_at}
+    <span className={pill.danger}>
+      <span aria-hidden className="size-1.5 rounded-full bg-current" />
+      Chain broken at #{verify.broken_at}
     </span>
   );
 }

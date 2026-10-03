@@ -7,6 +7,8 @@ interface ScoreResult { scoreboard: Board; tutor: { case: string; trap: boolean;
 import { useFlag } from "@/lib/flags";
 import { groundTruth, screenEvents } from "@/lib/session";
 import { sessionStats } from "@/lib/stats";
+import { card, eyebrow } from "@/components/ui/styles";
+import { auditHeaders } from "@/lib/audit";
 
 /** Demo numbers: what ExpertAI learned, saw, caught, and asked, scored on the server against the answer key. */
 export default function Scoreboard({ jobId, map }: { jobId: string; map: WorkMap | null }) {
@@ -21,7 +23,7 @@ export default function Scoreboard({ jobId, map }: { jobId: string; map: WorkMap
     const ctrl = new AbortController();
     fetch("/api/score", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auditHeaders() },
       signal: ctrl.signal,
       body: JSON.stringify({
         job_id: jobId,
@@ -42,11 +44,15 @@ export default function Scoreboard({ jobId, map }: { jobId: string; map: WorkMap
   const pct = (n: number) => `${Math.round(n * 100)}%`;
   const b = result?.scoreboard;
   const liveBlocks = new Set(stats.blocked.map((x) => x.caseIndex)).size;
+  const pending = !b; // scored on the server; "…" means not loaded yet, never a fabricated number
 
   return (
     <section aria-label="Scoreboard" className="mt-8">
-      <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Scoreboard</h2>
-      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className={eyebrow}>Scoreboard</h2>
+        {pending && <span className="text-note text-ink-tertiary" aria-live="polite">Scoring against the answer key…</span>}
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <Tile label="Rules learned" value={b ? `${b.rules_learned} / ${b.rules_total}` : "…"} hint="confirmed vs answer key" />
         <Tile label="Vision accuracy" value={b ? pct(b.vision_accuracy) : "…"} hint="events vs true changes" />
         <Tile
@@ -58,7 +64,7 @@ export default function Scoreboard({ jobId, map }: { jobId: string; map: WorkMap
         <Tile
           label="Live questions"
           value={String(stats.questions.length)}
-          hint={<span className={guardrail > 0 ? "font-medium text-amber-700 dark:text-amber-300" : ""}>{guardrail} guardrail</span>}
+          hint={<span className={guardrail > 0 ? "font-medium text-warning-ink" : ""}>{guardrail} guardrail</span>}
         />
       </dl>
     </section>
@@ -66,13 +72,18 @@ export default function Scoreboard({ jobId, map }: { jobId: string; map: WorkMap
 }
 
 function Tile({ label, value, hint, tone = "ok" }: { label: string; value: string; hint: React.ReactNode; tone?: "ok" | "warn" }) {
+  const pending = value === "…";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className={`mt-1 text-2xl font-semibold tabular-nums ${tone === "warn" ? "text-amber-700 dark:text-amber-300" : "text-slate-900 dark:text-slate-50"}`}>
-        {value}
-      </dd>
-      <dd className="mt-0.5 text-[11px] text-slate-500">{hint}</dd>
+    <div className={`${card} min-w-0 px-5 py-4`}>
+      <dt className="text-meta text-ink-secondary">{label}</dt>
+      {pending ? (
+        <dd className="mt-1 flex h-10 items-center text-sub text-ink-tertiary" aria-label="Not scored yet">
+          —
+        </dd>
+      ) : (
+        <dd className={`mt-1 text-metric tabular-nums ${tone === "warn" ? "text-warning-ink" : "text-ink"}`}>{value}</dd>
+      )}
+      <dd className="mt-0.5 text-note text-ink-tertiary">{pending ? "not scored yet" : hint}</dd>
     </div>
   );
 }
