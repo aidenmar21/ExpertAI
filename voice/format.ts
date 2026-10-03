@@ -51,40 +51,33 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
       return formatScreenEvent(m.event);
 
     case "ask_now":
-      return `[ASK NOW] ${oneLine(m.pick.question)}${m.pick.is_guardrail ? " (this is a guardrail question)" : ""}`;
+      return `[ASK NOW] ${oneLine(m.pick.question)}${m.pick.is_guardrail ? " (guardrail)" : ""}`;
 
     case "start_debrief": {
-      const lines = ["[DEBRIEF] Capture is over. Start the debrief now."];
+      // The hook runs the debrief itself (debrief.ts); this is the one-shot fallback. Steps and rules are already in [WORK MAP].
+      const lines = ["[DEBRIEF] Capture is over."];
       if (m.gaps.length) {
-        lines.push("Open gaps, ask one at a time:");
+        lines.push("Ask one at a time:");
         m.gaps.forEach((g, i) => lines.push(`${i + 1}. ${oneLine(g.question)}`));
-      } else {
-        lines.push("No open gaps. Go straight to the teach-back.");
       }
-      if (m.map.steps.length) {
-        lines.push("Steps you saw:");
-        m.map.steps.forEach((s) => lines.push(`${s.n}. ${oneLine(s.title)}: ${oneLine(s.decision)}`));
-      }
-      if (m.map.rules.length) {
-        lines.push("Rules learned so far:");
-        m.map.rules.forEach((r) => lines.push(`- ${oneLine(r.text)} (${r.type}; ${m.map.expert || expert} said: "${oneLine(r.reason_quote)}")`));
-      }
-      lines.push('After the gaps, explain the whole process back in under a minute, then ask "Is that right?"');
+      lines.push('Then tell the job back as a story, in order, in their words. End with "Is that right?"');
       return lines.join("\n");
     }
 
     case "guardrail_hit": {
       const { check } = m;
-      const parts = [
-        check.standard
-          ? `[GUARDRAIL] The new hire is about to go against the industry standard. No company rule covers this case yet. Their save is paused.`
-          : `[GUARDRAIL] The new hire is about to break a rule. Their save is paused.`,
-        check.standard
-          ? `Say: "Most people in this job would stop here. Why do you think?" Then wait. After they answer, explain that the industry standard is the rule below, that ${expert} has not said otherwise, and that they should check with their manager if unsure.`
-          : `Say only: "${expert} would stop here. Why do you think?" Then stop talking and wait for their answer.`,
-        check.standard ? "" : `After they answer, explain with ${expert}'s reason below, quoting them.`,
-      ];
       const quote = check.rule?.reason_quote ? oneLine(check.rule.reason_quote) : "";
+      const parts = check.standard
+        ? [
+            `[GUARDRAIL] Save paused. Industry standard, no company rule yet.`,
+            `Say only: "Most people in this job would stop here. Why do you think?" Then wait.`,
+            `After they answer, two sentences max: the usual way and why; say it's the usual way, not ${expert}'s rule.`,
+          ]
+        : [
+            `[GUARDRAIL] Save paused.`,
+            `Say only: "${expert} would stop here. Why do you think?" Then wait.`,
+            `After they answer, two sentences max: ${expert}'s reason, quoting them.`,
+          ];
       if (check.rule) {
         parts.push(sentence(`Rule: ${oneLine(check.rule.text)}`));
         if (quote) parts.push(`${expert} said: "${quote}"`);
@@ -92,12 +85,12 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
       }
       // brain's explanation repeats the rule and quote; only add it when it says something new.
       if (check.explanation && !(quote && check.explanation.includes(quote))) parts.push(sentence(`Why: ${oneLine(check.explanation)}`));
-      if (!check.standard && (check.clip_id || check.screen_moment)) parts.push(`A replay of ${expert}'s screen moment is available.`);
-      return parts.filter(Boolean).join(" ");
+      if (!check.standard && (check.clip_id || check.screen_moment)) parts.push("Replay available.");
+      return parts.join(" ");
     }
 
     case "stuck":
-      return `[STUCK] ${oneLine(m.hint)} Say this in your own words, in at most two sentences, then stop and wait.`;
+      return `[STUCK] ${sentence(oneLine(m.hint))} Two sentences max, then wait.`;
 
     case "off_record":
       return m.on ? "[OFF RECORD]" : "[ON RECORD]";
@@ -106,16 +99,38 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
 
 // ---------- transcript helpers ----------
 
-const OFF_RE = /\boff the record\b/i;
-const ON_RE = /\bon the record\b/i;
+// Spoken record toggles. The latest phrase in an utterance wins ("we were off the record, back on the record now" -> on).
+const OFF_RE = /\boff the record\b|\b(?:don'?t|do not) record (?:this|that)\b|\b(?:pause|stop) (?:the )?recording\b/gi;
+// "resume" alone, or "resume recording"; not "resume the refund" or "my resume".
+const ON_RE =
+  /\bon the record\b|(?<!\b(?:my|your|his|her|their|a|the) )\bresum(?:e|ing)\b(?!\s+(?:the|a|an|this|that|my|your|his|her|their)\s+(?!record))/gi;
 const YES_RE = /^\s*(yes|yeah|yep|yup|correct|exactly|right|that'?s (right|correct|it)|perfect)\b/i;
 const IS_THAT_RIGHT_RE = /\bis that (right|correct)\b/i;
 const HESITATION_RE = /\b(um+|uh+|hmm+|wait)\b|\bi don'?t know\b|\bnot sure\b/gi;
 
+function lastIndex(re: RegExp, text: string): number {
+  let last = -1;
+  for (const m of text.matchAll(re)) last = m.index ?? last;
+  return last;
+}
+
 /** "let's go off the record" -> true, "back on the record" -> false, otherwise null. */
 export function detectRecordToggle(text: string): boolean | null {
-  if (OFF_RE.test(text)) return true;
-  if (ON_RE.test(text)) return false;
+  const off = lastIndex(OFF_RE, text);
+  const on = lastIndex(ON_RE, text);
+  if (off < 0 && on < 0) return null;
+  return off > on;
+}
+
+export type OutgoingHold = { outcome: "held" | "dropped"; reason: string };
+
+/**
+ * Should this message be kept from the agent right now? null = send it.
+ * Off the record the agent must not see the screen or be prompted about it; during the debrief only the runner asks.
+ */
+export function holdOutgoing(m: AgentContextMessage, s: { offRecord: boolean; debrief: string }): OutgoingHold | null {
+  if (s.offRecord && (m.kind === "screen_event" || m.kind === "ask_now")) return { outcome: "held", reason: "off the record" };
+  if (m.kind === "ask_now" && (s.debrief === "asking" || s.debrief === "teach_back")) return { outcome: "dropped", reason: "debrief in progress" };
   return null;
 }
 

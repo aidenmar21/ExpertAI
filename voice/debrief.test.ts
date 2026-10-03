@@ -53,8 +53,26 @@ test("never more than five, guardrail survives the cap", () => {
 
 test("agent text", () => {
   const plan = planDebrief([], empty);
-  assert.match(formatDebriefQuestion(plan[0], 0, 3), /^\[DEBRIEF\] Capture is over\. .*Question 1 of 3/);
+  assert.match(formatDebriefQuestion(plan[0], 0, 3), /^\[DEBRIEF\] Capture is over\. Question 1 of 3/);
+  assert.match(formatDebriefQuestion(plan[0], 0, 3), /\(guardrail\)$/);
   assert.doesNotMatch(formatDebriefQuestion(plan[1], 1, 3), /Capture is over/);
-  assert.match(formatTeachBack(), /^\[TEACH BACK\].*Is that right\?/);
+  assert.match(formatTeachBack(), /^\[TEACH BACK\].*story, in order.*Is that right\?/);
+  assert.match(formatTeachBack(), /their own words/);
   assert.match(formatWorkMapContext(empty), /^\[WORK MAP\]\nWORK MAP for returns-desk, taught by Aarav\./);
+});
+
+test("every plan has 3 to 5 questions and at least one guardrail", () => {
+  const gap = (i: number) => ({ id: `g${i}`, question: `Why did you change field ${i}?` });
+  for (const n of [0, 1, 2, 3, 4, 5, 9]) {
+    const plan = planDebrief(Array.from({ length: n }, (_, i) => gap(i)), empty, "Shift manager");
+    assert.ok(plan.length >= 3 && plan.length <= 5, `${n} gaps -> ${plan.length} questions`);
+    assert.ok(plan.some((q) => q.is_guardrail), `${n} gaps -> no guardrail`);
+    assert.equal(new Set(plan.map((q) => q.id)).size, plan.length, "no repeats");
+  }
+});
+
+test("a guardrail gap counts as the guardrail", () => {
+  const plan = planDebrief([{ id: "g1", question: "When would you ask the manager?" }], empty);
+  assert.equal(plan.length, 3);
+  assert.ok(!plan.some((q) => q.id === "gen-stop"), "doesn't ask when to stop twice");
 });

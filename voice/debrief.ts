@@ -51,6 +51,8 @@ export function planDebrief(gaps: OpenGap[], map: MapWithRecords, escalateTo?: s
     { id: "gen-mistake", question: "What's the mistake a new person is most likely to make here?", source: "general", is_guardrail: false },
     { id: "gen-never", question: "Is there anything you'd never do on this screen, even if a customer pushed?", source: "general", is_guardrail: true },
   ];
+  // Already have a guardrail question: fill with the others first so we don't ask "when would you stop" twice.
+  if (plan.some((q) => q.is_guardrail)) general.sort((a, b) => Number(a.id === "gen-stop") - Number(b.id === "gen-stop"));
   for (const g of general) {
     const needGuardrail = g.is_guardrail && !plan.some((q) => q.is_guardrail);
     if (plan.length < MIN_QUESTIONS || needGuardrail) plan.push(g);
@@ -70,18 +72,18 @@ export function formatWorkMapContext(map: MapWithRecords): string {
 }
 
 export function formatDebriefQuestion(q: DebriefQuestion, index: number, total: number): string {
-  const first = index === 0 ? "Capture is over. Start the debrief now. " : "";
-  return (
-    `[DEBRIEF] ${first}Question ${index + 1} of ${total}. Ask only this, in your own words, in one short sentence: ` +
-    `${q.question}${q.is_guardrail ? " (guardrail question)" : ""} ` +
-    `If the answer is vague, ask one short follow-up. I'll send the next question.`
-  );
+  const first = index === 0 ? "Capture is over. " : "";
+  return `[DEBRIEF] ${first}Question ${index + 1} of ${total}, one short sentence: ${oneLine(q.question)}${q.is_guardrail ? " (guardrail)" : ""}`;
 }
 
 export function formatTeachBack(): string {
   return (
-    "[TEACH BACK] That was the last question. Now explain the whole process back in under a minute, " +
-    "in plain words, step by step, including the rules and when to stop and ask. Use the work map and what they just told you. " +
-    'End with "Is that right?" If they correct you, repeat the corrected part back and ask again.'
+    "[TEACH BACK] Last question done. Tell the job back as a story, in order, under a minute: " +
+    '"First you ... If ..., you ..., because ..." Quote their own words for each reason and say when to stop and ask. ' +
+    'End with "Is that right?"'
   );
+}
+
+function oneLine(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
