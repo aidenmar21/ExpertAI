@@ -40,3 +40,33 @@ if (typeof window !== "undefined") {
     screenEvents: () => screenEvents.all(),
   };
 }
+
+/**
+ * UI activity for stuck detection in tutor mode (field flips, hovering an action, idle with a record open).
+ * Derived counts go to engine.detectStuck; raw values never go to the agent.
+ */
+export const activity = (() => {
+  let changes: { t: number; field: string; record: string | null }[] = [];
+  let hovering: { action: string; since: number } | null = null;
+  let recordOpenedAt: number | null = null;
+  return {
+    fieldChanged(c: { t: number; field: string; record: string | null }) {
+      changes = [...changes.filter((x) => c.t - x.t < 30_000), c];
+    },
+    hover(action: string | null) {
+      hovering = action ? { action, since: sessionT() } : null;
+    },
+    recordOpened(t: number) {
+      recordOpenedAt = t;
+    },
+    /** Same field changed more than once in the last 30s on the open record. */
+    backAndForthCount(now: number): number {
+      const recent = changes.filter((x) => now - x.t < 30_000);
+      const byField = new Map<string, number>();
+      recent.forEach((x) => byField.set(`${x.record}|${x.field}`, (byField.get(`${x.record}|${x.field}`) ?? 0) + 1));
+      return Math.max(0, ...[...byField.values()].map((n) => n - 1));
+    },
+    hovering: (now: number) => (hovering ? { action: hovering.action, ms: now - hovering.since } : undefined),
+    recordOpenedAt: () => recordOpenedAt,
+  };
+})();

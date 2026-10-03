@@ -257,7 +257,8 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
   );
 }
 
-const noEvents = (): ScreenEvent[] => [];
+const EMPTY_EVENTS: ScreenEvent[] = [];
+const noEvents = () => EMPTY_EVENTS;
 const noMap = (): WorkMap | null => null;
 const emptyMap = (job_id: string, expert: string): WorkMap => ({ job_id, expert, steps: [], rules: [], open_gaps: [] });
 
@@ -361,7 +362,7 @@ function SayBox({ onSay }: { onSay: (text: string) => void }) {
   );
 }
 
-function EventRow({ e }: { e: ScreenEvent }) {
+export function EventRow({ e }: { e: ScreenEvent }) {
   return (
     <li className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm dark:bg-slate-800/60">
       <div className="flex items-center justify-between gap-2">

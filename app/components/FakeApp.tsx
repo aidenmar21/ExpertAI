@@ -1,14 +1,23 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { JobField, Value } from "@understudy/shared";
 import type { ClientJob, JobRecord } from "@/lib/job";
-import { groundTruth, sessionT } from "@/lib/session";
+import { activity, groundTruth, sessionT } from "@/lib/session";
 
 type Mode = "expert" | "new_hire";
 
+interface FakeAppProps {
+  profile: ClientJob;
+  mode?: Mode;
+  /** Tutor mode: runs before an action saves. Return false to block the save. */
+  beforeAction?: (action: string, record: JobRecord) => boolean;
+  /** Shown above the action bar, e.g. the tutor's guardrail notice. */
+  notice?: ReactNode;
+}
+
 /** Renders any job profile from its fields and actions. No per-job code. */
-export default function FakeApp({ profile, mode = "expert" }: { profile: ClientJob; mode?: Mode }) {
+export default function FakeApp({ profile, mode = "expert", beforeAction, notice }: FakeAppProps) {
   const { job, screen } = profile;
   const [records, setRecords] = useState<JobRecord[]>(() => profile.records[mode].map((r) => ({ ...r })));
   const [current, setCurrent] = useState(0);
@@ -19,13 +28,21 @@ export default function FakeApp({ profile, mode = "expert" }: { profile: ClientJ
   const recordId = (r: JobRecord | undefined, i: number) =>
     r && idField && r[idField] != null ? String(r[idField]) : `No ${labelOf(screen.fields[0])} #${i + 1}`;
 
+  function runAction(key: string, sets: JobRecord) {
+    activity.hover(null);
+    if (beforeAction && !beforeAction(key, records[current])) return;
+    commit(sets);
+  }
+
   function commit(changes: JobRecord) {
     const before = records[current];
     const t = sessionT();
     for (const [field, to] of Object.entries(changes)) {
       const from = before[field] ?? null;
       if (from === to) continue;
-      groundTruth.push({ t, field, from, to, record: idField ? (before[idField] as string | null) ?? null : null });
+      const record = idField ? (before[idField] as string | null) ?? null : null;
+      groundTruth.push({ t, field, from, to, record });
+      activity.fieldChanged({ t, field, record });
     }
     setRecords((rs) => rs.map((r, i) => (i === current ? { ...r, ...changes } : r)));
   }
@@ -51,7 +68,10 @@ export default function FakeApp({ profile, mode = "expert" }: { profile: ClientJ
             {records.map((r, i) => (
               <li key={i}>
                 <button
-                  onClick={() => setCurrent(i)}
+                  onClick={() => {
+                    setCurrent(i);
+                    activity.recordOpened(sessionT());
+                  }}
                   className={`w-full rounded-xl px-3 py-2 text-left text-sm transition ${
                     i === current
                       ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
@@ -87,11 +107,14 @@ export default function FakeApp({ profile, mode = "expert" }: { profile: ClientJ
                 ))}
             </form>
 
+            {notice}
             <footer className="flex flex-wrap gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-800">
               {screen.actions.map((a, i) => (
                 <button
                   key={a.key}
-                  onClick={() => commit(a.sets)}
+                  onClick={() => runAction(a.key, a.sets)}
+                  onPointerEnter={() => activity.hover(a.key)}
+                  onPointerLeave={() => activity.hover(null)}
                   className={
                     i === 0
                       ? "rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500"
