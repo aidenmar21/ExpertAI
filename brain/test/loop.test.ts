@@ -9,7 +9,7 @@ import {
   unlinkedExpertLines, validateLinks, classifyQuestion, type LineLink,
   type RuleCandidate, type WorkMapWithRecords,
 } from "../index";
-import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, screenValues, scoreSession, redactTranscriptForJob } from "../server";
+import { buildWorkMap, confirmWorkMap, loadJob, agentSafeJob, screenValues, scoreSession, redactTranscriptForJob, parsePolicy } from "../server";
 import { runTutorCases, rulesLearned, OFF_RECORD_TEXT } from "../index";
 import { events, transcript, debrief, ev, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
@@ -245,6 +245,12 @@ const emptyMap = (job_id: string) => ({ job_id, expert: "Aarav", steps: [], rule
   assert.ok(!JSON.stringify(shown).match(/Priya Raman|0932|Jordan Ellis|cousin/), "panel transcript redacted");
   assert.equal(shown.find((l) => l.t === 160_000)!.text, "Okay, back on the record.", "on-record lines kept");
   console.log("ok redaction: Work Map and panel transcript carry no PII or off-record text");
+
+  // 10. parsePolicy without a model key or job: no rules, no crash.
+  assert.deepEqual(await parsePolicy("Refunds over $100 need a shift manager.", job), []);
+  assert.deepEqual(await parsePolicy("Refunds over $100 need a shift manager."), []);
+  assert.deepEqual(await parsePolicy("   ", job), []);
+  console.log("ok parsePolicy (no key): returns []");
 
   const _typecheck: Rule[] = map1.rules;
   void _typecheck;

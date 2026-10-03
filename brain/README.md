@@ -20,7 +20,7 @@ events + transcript ──captureDecisions──> DecisionRecords (what / how / 
 | Import | Where | Contains |
 |---|---|---|
 | `@understudy/brain` | browser or server | capture, picker, validation, `checkAction`, redaction, scoring. No SDK, no env, no `node:` imports (checked by `test/browser-safe.mjs`). |
-| `@understudy/brain/server` | Next.js API routes only | `buildWorkMap`, `confirmWorkMap`, `loadJob`. Reads `ANTHROPIC_API_KEY` and `LLM_MODEL` (default `claude-opus-5-5`). |
+| `@understudy/brain/server` | Next.js API routes only | `buildWorkMap`, `confirmWorkMap`, `parsePolicy`, `scoreSession`, `redactTranscriptForJob`, `loadJob`. Reads `ANTHROPIC_API_KEY` and `LLM_MODEL` (default `claude-opus-5-5`). |
 
 ## Integration (app)
 
@@ -76,6 +76,13 @@ const { scoreboard, tutor, rules } = scoreSession(body);
 ### Privacy (judge test 5)
 - `buildWorkMap` redacts the transcript before any step (the model never sees PII) and redacts every string of the returned map: patterns (card, IBAN, email, phone) plus the job's PII field values.
 - `redactTranscriptForJob(job_id, transcript)` (server) gives the panel a transcript with off-record lines replaced by `[off the record]` and PII redacted.
+
+### Written policy (`POST /api/policy`, server)
+```ts
+import { parsePolicy } from "@understudy/brain/server";
+const rules = await parsePolicy(text, job);   // Rule[]: source "policy", confirmed false
+```
+Same model call and validation as expert answers. Each rule must quote one policy sentence (`reason_quote` is that full sentence) and use the job's real fields and actions. Text is PII-redacted first. Without a job or a model key it returns `[]`. Policy rules enforce only after the expert confirms them.
 
 ### Question picker (engine)
 `pickFromRecords(events, transcript, { now, maxAgeMs = 60000 }) -> QuestionPick | null`. It follows up on the latest explained decision (what would change it, then when to stop with `is_guardrail: true`), then asks why about the newest unexplained decision. It never repeats a question, never re-asks after a vague answer, and stays silent off the record. Engine filters out routine decisions.

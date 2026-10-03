@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Value } from "@understudy/shared";
 import { checkAction, correctWorkMap, workMapToAgentText, type WorkMapWithRecords } from "../index";
-import { buildWorkMap, confirmWorkMap, loadJob, scoreSession } from "../server";
+import { buildWorkMap, confirmWorkMap, loadJob, scoreSession, parsePolicy } from "../server";
 import { events, transcript, debrief, OFF_RECORD_MARKERS, CORRECTION_TEXT } from "./fixtures";
 
 for (const p of [join(process.cwd(), ".env.local"), join(process.cwd(), "app/.env.local"), join(process.cwd(), "../app/.env.local"), join(process.cwd(), "../.env.local")]) {
@@ -129,6 +129,18 @@ const show = (m: WorkMapWithRecords) => {
   console.log(`    $142 refund with receipt ${withReceipt.ok ? "ALLOWED" : "BLOCKED"}, N3 no-receipt refund ${check(one, "refund", nh[2]).ok ? "ALLOWED" : "BLOCKED"}`);
   assert.equal(withReceipt.ok, false, "$100 rule applies with a receipt too");
   assert.equal(check(one, "refund", nh[2]).ok, false, "no-receipt rule applies");
+
+  // 7. Written policy -> rules (source "policy", unconfirmed, quote = full sentence).
+  t0 = Date.now();
+  const POLICY = "Returns are accepted within 30 days with a receipt. Refunds over $100 need the shift manager's approval. Opened access codes are never refundable. Have a nice day.";
+  const pol = await parsePolicy(POLICY, job);
+  console.log(`\n[5] parsePolicy: ${pol.length} rules, ${Date.now() - t0}ms`);
+  for (const r of pol) console.log(`   policy rule [${r.type}] ${r.text}\n        when ${JSON.stringify(r.when)} then ${JSON.stringify(r.then)}\n        quote "${r.reason_quote}"`);
+  assert.ok(pol.length >= 2, "policy rules extracted");
+  const polSentences = POLICY.split(/(?<=[.!?])\s+/);
+  assert.ok(pol.every((r) => r.source === "policy" && !r.confirmed && polSentences.includes(r.reason_quote)), "source policy, unconfirmed, quote = one full policy sentence");
+  assert.ok(pol.some((r) => r.when.some((c) => c.field === "price" && Number(c.value) === 100)), "the $100 limit became a rule");
+  assert.ok(!pol.some((r) => /nice day/i.test(r.reason_quote)), "no rule from small talk");
 
   console.log("\nALL REAL-MODEL CHECKS PASS");
 })().catch((e) => { console.error(e); process.exit(1); });

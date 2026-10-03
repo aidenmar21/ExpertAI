@@ -12,7 +12,7 @@ import {
   type DecisionRecord, type LineLink, type WorkMapWithRecords,
 } from "./records";
 import {
-  OPS, RULE_TYPES, expertCases, validateCandidates,
+  OPS, RULE_TYPES, expertCases, validateCandidates, sentences, normQuote,
   type Rejection, type RuleCandidate, type RuleEvidence,
 } from "./validate";
 
@@ -341,6 +341,31 @@ export function confirmWorkMap(map: WorkMapWithRecords, at = new Date().toISOStr
     records: map.records.map((r) => (r.why !== null ? { ...r, status: "confirmed" as const } : r)),
     confirmed_at: at,
   };
+}
+
+// ---------- Written policy -> rules ----------
+// Company knowledge text (policy, SOP) -> checkable rules with source "policy", unconfirmed.
+// Same model call and validation as expert answers: every rule must quote one policy sentence and use real
+// fields/actions of the job. reason_quote is expanded to the full sentence it came from.
+// Without a job there is no screen to check rules against, so the result is [].
+export async function parsePolicy(text: string, job?: JobProfile): Promise<Rule[]> {
+  const clean = text.trim();
+  if (!clean || !job) return [];
+  const pii = piiValues(job);
+  const redacted = redact(clean, pii);
+  const parts = sentences(redacted);
+  const rec: DecisionRecord = {
+    id: "policy", what: "Written policy", how: null, why: redacted,
+    exceptions: [], guardrails: [], quotes: [redacted], quote_t: [0],
+    sources: { event_ids: [], transcript_t: [], screen_moment: { t: 0 } },
+    asked: [], unknown: [], status: "unconfirmed",
+  };
+  const res = await extractRules([rec], job, []);
+  return res.rules.map((r) => {
+    const q = normQuote(r.reason_quote);
+    const sentence = parts.find((x) => normQuote(x).includes(q)) ?? r.reason_quote;
+    return { ...r, id: r.id.replace(/^rule-policy-/, "policy-"), reason_quote: sentence, source: "policy" as const, confirmed: false };
+  });
 }
 
 // ---------- Scoring and transcript (server: these read the answer key / PII lists) ----------
