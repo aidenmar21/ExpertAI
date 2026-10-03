@@ -1,0 +1,89 @@
+{
+  "_readme": "Pre-loaded knowledge for ExpertAI: what a good trainer already knows about each role and tool before meeting the expert. Roles map to knowledge/roles/<id>.md, software to knowledge/software/<id>.md, baseline rules to knowledge/baseline-rules.json. Nothing here is company-specific; the expert's own words always win.",
+  "roles": [
+    {
+      "id": "retail-cashier-returns",
+      "name": "Retail cashier, returns desk",
+      "category": "Retail",
+      "summary": "Takes returns and exchanges at the counter: checks the receipt, the item, and the window, then refunds the right way or escalates.",
+      "software": ["square-pos", "shopify-pos", "generic-web-form"],
+      "record_type": "return",
+      "escalate_to": "Shift manager"
+    },
+    {
+      "id": "accounts-payable-clerk",
+      "name": "Accounts payable clerk, invoice approval",
+      "category": "Finance",
+      "summary": "Verifies supplier invoices against purchase orders and goods receipts, codes them, and approves, holds, or sends them up.",
+      "software": ["sap-accounts-payable", "quickbooks", "excel-and-google-sheets", "gmail-and-outlook"],
+      "record_type": "invoice",
+      "escalate_to": "Controller"
+    },
+    {
+      "id": "customer-support-agent",
+      "name": "Customer support agent, tier 1",
+      "category": "Support",
+      "summary": "Works the ticket queue: first response inside the SLA, solves what tier 1 can, refunds within limits, escalates the rest.",
+      "software": ["zendesk", "salesforce", "gmail-and-outlook"],
+      "record_type": "ticket",
+      "escalate_to": "Support lead"
+    },
+    {
+      "id": "front-desk-receptionist",
+      "name": "Front desk receptionist, hotel check-in",
+      "category": "Hospitality",
+      "summary": "Checks guests in and out: verifies ID and a card, assigns rooms, handles upgrades and fee waivers within limits.",
+      "software": ["generic-web-form", "gmail-and-outlook", "google-calendar"],
+      "record_type": "reservation",
+      "escalate_to": "Front office manager"
+    },
+    {
+      "id": "hr-onboarding-coordinator",
+      "name": "HR onboarding coordinator",
+      "category": "People",
+      "summary": "Gets a new hire from signed offer to day one: I-9, W-4, direct deposit, background check, equipment, and system access, on time.",
+      "software": ["generic-web-form", "gmail-and-outlook", "excel-and-google-sheets", "google-calendar"],
+      "record_type": "new hire",
+      "escalate_to": "HR manager"
+    },
+    {
+      "id": "insurance-claims-intake",
+      "name": "Insurance claims intake specialist",
+      "category": "Insurance",
+      "summary": "Takes first notice of loss: confirms the policy was active, captures the facts, requests documents, assigns an adjuster, and flags fraud signals.",
+      "software": ["salesforce", "generic-web-form", "gmail-and-outlook"],
+      "record_type": "claim",
+      "escalate_to": "Claims supervisor"
+    },
+    {
+      "id": "scheduling-coordinator",
+      "name": "Scheduling coordinator",
+      "category": "Operations",
+      "summary": "Books, moves, and cancels appointments without double-booking a provider, and applies cancellation and no-show rules fairly.",
+      "software": ["google-calendar", "gmail-and-outlook", "excel-and-google-sheets"],
+      "record_type": "appointment",
+      "escalate_to": "Office manager"
+    },
+    {
+      "id": "bookkeeping-assistant",
+      "name": "Bookkeeping assistant",
+      "category": "Finance",
+      "summary": "Categorizes transactions, chases receipts, reconciles bank accounts, and never touches a closed period without the bookkeeper.",
+      "software": ["quickbooks", "excel-and-google-sheets", "gmail-and-outlook"],
+      "record_type": "transaction",
+      "escalate_to": "Senior bookkeeper"
+    }
+  ],
+  "software": [
+    { "id": "square-pos", "name": "Square Point of Sale", "kind": "pos", "used_by": ["retail-cashier-returns"] },
+    { "id": "shopify-pos", "name": "Shopify POS", "kind": "pos", "used_by": ["retail-cashier-returns"] },
+    { "id": "quickbooks", "name": "QuickBooks Online", "kind": "accounting", "used_by": ["bookkeeping-assistant", "accounts-payable-clerk"] },
+    { "id": "sap-accounts-payable", "name": "SAP Accounts Payable", "kind": "erp", "used_by": ["accounts-payable-clerk"] },
+    { "id": "zendesk", "name": "Zendesk Support", "kind": "helpdesk", "used_by": ["customer-support-agent"] },
+    { "id": "salesforce", "name": "Salesforce Service Cloud", "kind": "crm", "used_by": ["customer-support-agent", "insurance-claims-intake"] },
+    { "id": "excel-and-google-sheets", "name": "Excel and Google Sheets", "kind": "spreadsheet", "used_by": ["bookkeeping-assistant", "accounts-payable-clerk", "hr-onboarding-coordinator", "scheduling-coordinator"] },
+    { "id": "gmail-and-outlook", "name": "Gmail and Outlook", "kind": "email", "used_by": ["accounts-payable-clerk", "customer-support-agent", "front-desk-receptionist", "hr-onboarding-coordinator", "insurance-claims-intake", "scheduling-coordinator", "bookkeeping-assistant"] },
+    { "id": "google-calendar", "name": "Google Calendar", "kind": "calendar", "used_by": ["scheduling-coordinator", "front-desk-receptionist", "hr-onboarding-coordinator"] },
+    { "id": "generic-web-form", "name": "Internal web app (record list + form)", "kind": "web-app", "used_by": ["front-desk-receptionist", "hr-onboarding-coordinator", "insurance-claims-intake", "retail-cashier-returns"] }
+  ]
+}

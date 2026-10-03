@@ -74,8 +74,11 @@ export interface Rule {
   reason_quote: string;         // the expert's own words
   screen_moment: ScreenMoment;
   clip_id?: string;             // expert audio clip
-  source: "live_question" | "debrief" | "teach_back" | "policy";
-  confirmed: boolean;           // true after teach-back
+  source: "live_question" | "debrief" | "teach_back" | "policy" | "baseline";
+  // live_question/debrief/teach_back: the expert's spoken words. policy: parsed from written company text.
+  // baseline: industry standard from knowledge/baseline-rules.json; only enforces once an expert confirms it.
+  confirmed: boolean;           // true after teach-back (or the expert accepted a policy/baseline rule)
+  overridden_by?: string;       // baseline rule replaced by a company rule id ("At your company this differs")
 }
 
 export interface WorkMapStep {
@@ -123,10 +126,17 @@ export type AgentContextMessage =
 // voice: sendContext(m: AgentContextMessage): void   (formats as text, e.g. "[SCREEN] field_changed refund_method Card -> Cash on R-88104")
 
 // ---------- Job profile (shared/jobs/*.json) ----------
-export interface JobField { key: string; label: string; type: "text" | "money" | "date" | "select" | "status"; options?: string[]; pii?: boolean; }
+export interface JobField {
+  key: string; label: string; type: "text" | "money" | "date" | "select" | "status"; options?: string[]; pii?: boolean;
+  readonly?: boolean;           // data the app shows but the worker does not edit (e.g. supplier_master)
+}
 export interface JobAction { key: string; label: string; sets: Record<string, Value>; }
 export interface JobProfile {
-  job: { id: string; name: string; category: string; business_date: string; written_policy: string; escalate_to: string };
+  job: {
+    id: string; name: string; category: string; business_date: string; written_policy: string; escalate_to: string;
+    role_id?: string;           // knowledge/roles/<role_id>.md: what ExpertAI already knows about this role
+    software_ids?: string[];    // knowledge/software/<id>.md: the tools this job is done in
+  };
   screen: { record_type: string; fields: JobField[]; actions: JobAction[] };
   [extra: string]: unknown;     // catalog, customers, cases, hidden_rules (answer key, never sent to agent)
 }

@@ -6,7 +6,11 @@
     "category": "Retail",
     "business_date": "2026-10-03",
     "written_policy": "Returns accepted within 30 days with a receipt. Items must be in resaleable condition. Refunds go to the original payment method.",
-    "escalate_to": "Shift manager"
+    "escalate_to": "Shift manager",
+    "role_id": "retail-cashier-returns",
+    "software_ids": [
+      "square-pos"
+    ]
   },
   "screen": {
     "record_type": "return",

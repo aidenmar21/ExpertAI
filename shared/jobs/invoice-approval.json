@@ -6,7 +6,11 @@
     "category": "Finance / Accounts payable",
     "business_date": "2026-12-29",
     "written_policy": "Invoices are checked against PO and delivery note, coded to the correct cost center, and approved within your approval limit. Currency EUR.",
-    "escalate_to": "Controller"
+    "escalate_to": "Controller",
+    "role_id": "accounts-payable-clerk",
+    "software_ids": [
+      "sap-accounts-payable"
+    ]
   },
   "screen": {
     "record_type": "invoice",

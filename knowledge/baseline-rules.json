@@ -1,0 +1,1490 @@
+{
+  "_readme": "Baseline rules per role: industry-standard practice ExpertAI starts from before meeting the expert. Format: shared/contracts.ts Rule with source 'baseline' and confirmed:false. They never enforce on their own; an expert confirms or overrides each one. reason_quote holds the standard rationale, not an expert's words.",
+  "roles": {
+    "retail-cashier-returns": [
+      {
+        "id": "bl-ret-1",
+        "text": "No receipt: store credit only, at the lowest recent selling price.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "receipt_no",
+            "op": "missing"
+          }
+        ],
+        "then": {
+          "must": {
+            "refund_method": "Store credit"
+          },
+          "must_not_action": [
+            "refund"
+          ]
+        },
+        "reason_quote": "Industry standard: without proof of purchase there is no way to know what was paid, so stores refund to store credit at the lowest price the item sold for recently.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-2",
+        "text": "Card purchases refund to the original card, never cash.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "payment_method",
+            "op": "eq",
+            "value": "card"
+          }
+        ],
+        "then": {
+          "must": {
+            "refund_method": "Original card"
+          },
+          "must_not": {
+            "refund_method": "Cash"
+          }
+        },
+        "reason_quote": "Industry standard: refunding a card purchase in cash defeats chargeback protection and is the most common refund-fraud pattern.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-3",
+        "text": "Returns after 30 days need a manager.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "days_since_purchase",
+            "op": "gt",
+            "value": 30
+          }
+        ],
+        "then": {
+          "escalate_to": "Shift manager"
+        },
+        "reason_quote": "Industry standard: most retail return windows are 30 days; anything past that is a manager's judgment, not the cashier's.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-4",
+        "text": "Refunds over $100 need a manager override before anything is given back.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "price",
+            "op": "gt",
+            "value": 100
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "refund",
+            "store_credit"
+          ],
+          "escalate_to": "Shift manager"
+        },
+        "reason_quote": "Industry standard: a $100 to $200 cashier limit is typical; above it a manager keys an override so large refunds are always seen by two people.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-5",
+        "text": "Opened software, access codes, or shrink-wrapped media are not refundable.",
+        "type": "exception",
+        "when": [
+          {
+            "field": "item_type",
+            "op": "eq",
+            "value": "textbook_access_code"
+          },
+          {
+            "field": "condition",
+            "op": "eq",
+            "value": "Opened"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "refund",
+            "store_credit"
+          ]
+        },
+        "reason_quote": "Industry standard: once an access code or license is exposed it can have been used, so it cannot be resold.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-6",
+        "text": "Defective items: offer an exchange first, refund only if the customer declines.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "condition",
+            "op": "eq",
+            "value": "Defective"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "refund"
+          ]
+        },
+        "reason_quote": "Industry standard: a defective item is a warranty case; exchange keeps the sale and the customer, and the supplier credits the store.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-7",
+        "text": "Damaged (customer-caused) items are denied unless a manager approves.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "condition",
+            "op": "eq",
+            "value": "Damaged"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "refund",
+            "store_credit"
+          ],
+          "escalate_to": "Shift manager"
+        },
+        "reason_quote": "Industry standard: wear, water, or drop damage is not a defect; the store cannot resell it, so a manager decides on goodwill.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ret-8",
+        "text": "Cash refunds over $50 need a manager present at the drawer.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "refund_method",
+            "op": "eq",
+            "value": "Cash"
+          },
+          {
+            "field": "price",
+            "op": "gt",
+            "value": 50
+          }
+        ],
+        "then": {
+          "escalate_to": "Shift manager"
+        },
+        "reason_quote": "Industry standard: cash leaving the drawer is the highest-risk transaction on the floor; a second person watches it above a small threshold.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "accounts-payable-clerk": [
+      {
+        "id": "bl-ap-1",
+        "text": "Supplier not in master data: hold the invoice until the vendor is set up and verified.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "supplier_master",
+            "op": "eq",
+            "value": "Not in master data"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "escalate_to": "Controller"
+        },
+        "reason_quote": "Industry standard: paying an unvetted vendor is how invoice fraud starts; bank details are verified through master-data onboarding, never from the invoice itself.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-2",
+        "text": "Invoice without a PO above the no-PO limit goes to the controller.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "po_match",
+            "op": "eq",
+            "value": "No PO"
+          },
+          {
+            "field": "amount",
+            "op": "gt",
+            "value": 1000
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "escalate_to": "Controller"
+        },
+        "reason_quote": "Industry standard: small no-PO invoices (utilities, subscriptions) are fine; above a few hundred to a thousand, someone must confirm the spend was authorized.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-3",
+        "text": "PO mismatch on price or quantity beyond tolerance: hold and request information from the buyer.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "po_match",
+            "op": "eq",
+            "value": "Mismatch"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "must": {
+            "status": "On hold"
+          }
+        },
+        "reason_quote": "Industry standard: three-way match (PO, receipt, invoice) with a small tolerance, typically 2 to 5 percent or a fixed amount; outside it the invoice is blocked, not approved.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-4",
+        "text": "Delivery note already paid on another invoice: this is a duplicate, do not approve.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "delivery_note_history",
+            "op": "eq",
+            "value": "Already paid"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "escalate_to": "Controller"
+        },
+        "reason_quote": "Industry standard: duplicate payments are the single biggest AP leak; the same delivery can only be billed once.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-5",
+        "text": "Invoices above the clerk's approval limit are routed to the controller.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "amount",
+            "op": "gt",
+            "value": 10000
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "escalate_to": "Controller"
+        },
+        "reason_quote": "Industry standard: delegation-of-authority matrices give AP clerks a ceiling, often 5,000 to 10,000; above it a controller or budget owner approves.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-6",
+        "text": "Equipment and machinery over the capitalization threshold is coded to a capex account, not opex.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "cost_center",
+            "op": "eq",
+            "value": "4711"
+          },
+          {
+            "field": "amount",
+            "op": "gt",
+            "value": 5000
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ],
+          "escalate_to": "Controller"
+        },
+        "reason_quote": "Industry standard: anything with a multi-year life above the capitalization threshold (often 2,500 to 5,000) is an asset; coding it to repairs misstates the P&L.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-7",
+        "text": "Invoice date older than 90 days: confirm it was not already paid before approving.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "invoice_date",
+            "op": "present"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ]
+        },
+        "reason_quote": "Industry standard: late-arriving invoices are often duplicates or already settled; search by amount and vendor before posting.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ap-8",
+        "text": "Never approve an invoice whose bank details changed from the vendor master without a callback.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "supplier_master",
+            "op": "eq",
+            "value": "In master data"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "approve"
+          ]
+        },
+        "reason_quote": "Industry standard: bank-change requests on an invoice or email are the classic business-email-compromise fraud; confirm by phone on a number already on file.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "customer-support-agent": [
+      {
+        "id": "bl-cs-1",
+        "text": "Urgent tickets get a first response within 1 hour.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "priority",
+            "op": "eq",
+            "value": "Urgent"
+          },
+          {
+            "field": "first_response_sent",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "close"
+          ]
+        },
+        "reason_quote": "Industry standard: SLA ladders are roughly 1 hour urgent, 4 hours high, 8 business hours normal, 24 hours low; the first response starts the clock.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-2",
+        "text": "Refunds over the agent limit go to a lead.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "refund_amount",
+            "op": "gt",
+            "value": 100
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "refund"
+          ],
+          "escalate_to": "Support lead"
+        },
+        "reason_quote": "Industry standard: tier 1 agents can refund up to a small amount (50 to 100) without approval; above it a lead signs off.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-3",
+        "text": "Enterprise accounts escalate on any High or Urgent issue.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "account_tier",
+            "op": "eq",
+            "value": "Enterprise"
+          },
+          {
+            "field": "priority",
+            "op": "eq",
+            "value": "Urgent"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "close"
+          ],
+          "escalate_to": "Support lead"
+        },
+        "reason_quote": "Industry standard: enterprise contracts carry named-contact and uptime commitments; tier 1 keeps the customer informed but a lead owns the fix.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-4",
+        "text": "Never close a ticket without a reply the customer can see.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "first_response_sent",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "close"
+          ]
+        },
+        "reason_quote": "Industry standard: closing silently is the top driver of bad CSAT and reopened tickets; even a one-line resolution note is sent publicly.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-5",
+        "text": "Security, legal, or data-deletion requests are escalated, never handled in tier 1.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "category",
+            "op": "in",
+            "value": [
+              "security",
+              "legal",
+              "data_deletion"
+            ]
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "reply",
+            "close"
+          ],
+          "escalate_to": "Support lead"
+        },
+        "reason_quote": "Industry standard: these carry regulatory deadlines (GDPR 30 days) and liability; a lead routes them to the right owner.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-6",
+        "text": "Angry customers get acknowledgement before troubleshooting.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "sentiment",
+            "op": "eq",
+            "value": "negative"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: acknowledge, apologize once, then act; skipping to the fix reads as dismissive and the ticket escalates.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-7",
+        "text": "Pending means waiting on the customer; set it only after you have asked them something.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "status",
+            "op": "eq",
+            "value": "Pending"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: Pending pauses the SLA clock; using it to park work you own is an SLA cheat and is audited.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-cs-8",
+        "text": "Social channel tickets are answered publicly only with a short pointer to private support.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "channel",
+            "op": "eq",
+            "value": "social"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: never discuss account details in public; move it to DM or email.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "front-desk-receptionist": [
+      {
+        "id": "bl-fd-1",
+        "text": "No government ID verified: do not check the guest in.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "id_verified",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "check_in"
+          ]
+        },
+        "reason_quote": "Industry standard: ID matching the reservation name protects the hotel against fraud and is required by law in many jurisdictions.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-2",
+        "text": "No card on file: a card for incidentals is required before check-in.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "card_on_file",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "check_in"
+          ],
+          "escalate_to": "Front office manager"
+        },
+        "reason_quote": "Industry standard: a card hold (often 50 to 100 per night) covers incidentals and damage; cash guests need a larger deposit and a manager.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-3",
+        "text": "Upgrades to suites or above two categories need the front office manager.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "room_type",
+            "op": "in",
+            "value": [
+              "Suite",
+              "Junior suite"
+            ]
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "upgrade"
+          ],
+          "escalate_to": "Front office manager"
+        },
+        "reason_quote": "Industry standard: agents can upgrade one category when available; suites are revenue the manager controls.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-4",
+        "text": "Fee waivers over $50 need a manager.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "balance_due",
+            "op": "gt",
+            "value": 50
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "waive_fee"
+          ],
+          "escalate_to": "Front office manager"
+        },
+        "reason_quote": "Industry standard: small goodwill waivers (late checkout, a minibar item) are at the desk's discretion; larger ones are logged and approved.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-5",
+        "text": "Platinum and Gold guests get the best available room in their category and a welcome amenity.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "loyalty_tier",
+            "op": "in",
+            "value": [
+              "Gold",
+              "Platinum"
+            ]
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: loyalty tiers carry published benefits; missing them generates the complaints that cost the most.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-6",
+        "text": "A balance due from a previous stay must be settled before check-in.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "balance_due",
+            "op": "gt",
+            "value": 0
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "check_in"
+          ]
+        },
+        "reason_quote": "Industry standard: open balances are collected at the next contact; checking in over an unpaid balance usually means it is never collected.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-7",
+        "text": "Never confirm a guest's room number out loud at the desk or to a caller.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "status",
+            "op": "eq",
+            "value": "Checked in"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: guest privacy and safety; room numbers are written on the key packet and callers are connected without the number being said.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-fd-8",
+        "text": "Third-party bookings (OTA) are not refunded at the desk; the guest goes back to the channel.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "rate",
+            "op": "present"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "waive_fee"
+          ]
+        },
+        "reason_quote": "Industry standard: the hotel never took the guest's payment, so it cannot refund it; the OTA does.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "hr-onboarding-coordinator": [
+      {
+        "id": "bl-hr-1",
+        "text": "No signed offer: nothing else starts.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "offer_signed",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "grant_access",
+            "mark_complete"
+          ]
+        },
+        "reason_quote": "Industry standard: the signed offer is the authorization for every downstream step, including equipment and background check consent.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-2",
+        "text": "Background check flagged: escalate to the HR manager, do not grant access or mark complete.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "background_check",
+            "op": "eq",
+            "value": "Flagged"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "grant_access",
+            "mark_complete"
+          ],
+          "escalate_to": "HR manager"
+        },
+        "reason_quote": "Industry standard: adverse-action rules (FCRA) require a specific process; the coordinator never adjudicates a flag.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-3",
+        "text": "I-9 Section 2 must be complete within 3 business days of the start date.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "i9_status",
+            "op": "neq",
+            "value": "Complete"
+          },
+          {
+            "field": "days_to_start",
+            "op": "lt",
+            "value": 0
+          }
+        ],
+        "then": {
+          "escalate_to": "HR manager"
+        },
+        "reason_quote": "Industry standard: the I-9 deadline is federal law; an incomplete I-9 after day three is a compliance incident.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-4",
+        "text": "Not 'Ready for day one' until I-9, W-4, and direct deposit are all received.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "w4_status",
+            "op": "eq",
+            "value": "Missing"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "mark_complete"
+          ]
+        },
+        "reason_quote": "Industry standard: payroll cannot run without the W-4 and banking details; a missing one means a missed first paycheck.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-5",
+        "text": "System access is requested at least 5 business days before start, never granted before the start date.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "days_to_start",
+            "op": "lt",
+            "value": 5
+          },
+          {
+            "field": "system_access",
+            "op": "eq",
+            "value": "None"
+          }
+        ],
+        "then": {
+          "escalate_to": "HR manager"
+        },
+        "reason_quote": "Industry standard: IT lead times are the usual reason day one is wasted; access itself activates on the start date for security.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-6",
+        "text": "Never share SSN, bank details, or background results over email or chat.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "employee",
+            "op": "present"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: PII goes through the HRIS or an encrypted portal only; email is the most common HR data breach.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-hr-7",
+        "text": "Equipment is ordered at offer signature so it ships before the start date.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "offer_signed",
+            "op": "eq",
+            "value": "Yes"
+          },
+          {
+            "field": "equipment_requested",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: laptop lead time is one to two weeks; ordering at signature is what makes remote day one work.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "insurance-claims-intake": [
+      {
+        "id": "bl-ins-1",
+        "text": "Policy lapsed or cancelled on the loss date: do not open a claim; refer to the supervisor.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "policy_status",
+            "op": "in",
+            "value": [
+              "Lapsed",
+              "Cancelled"
+            ]
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "open_claim",
+            "assign_adjuster"
+          ],
+          "escalate_to": "Claims supervisor"
+        },
+        "reason_quote": "Industry standard: coverage is determined by policy status on the date of loss, not the report date; a lapsed policy is a coverage question for a supervisor, not a denial at intake.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-2",
+        "text": "Loss reported more than 30 days late is flagged for the supervisor before assignment.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "days_to_report",
+            "op": "gt",
+            "value": 30
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "assign_adjuster"
+          ],
+          "escalate_to": "Claims supervisor"
+        },
+        "reason_quote": "Industry standard: late notice can prejudice the investigation and policies require prompt reporting; it is not automatically denied, but someone senior decides.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-3",
+        "text": "Theft and injury claims require a police or incident report before documents are considered complete.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "loss_type",
+            "op": "in",
+            "value": [
+              "theft",
+              "injury"
+            ]
+          },
+          {
+            "field": "police_report",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "assign_adjuster"
+          ]
+        },
+        "reason_quote": "Industry standard: a third-party report anchors the facts; without it the claim stays in Pending documents.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-4",
+        "text": "Estimated amount above the intake limit is assigned to a senior adjuster.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "estimated_amount",
+            "op": "gt",
+            "value": 25000
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "assign_adjuster"
+          ],
+          "escalate_to": "Claims supervisor"
+        },
+        "reason_quote": "Industry standard: adjusters carry authority levels; large losses go to a senior desk or field adjuster from the start.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-5",
+        "text": "Two or more fraud flags, or three or more prior claims in 12 months: refer to SIU, do not assign.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "prior_claims_12m",
+            "op": "gte",
+            "value": 3
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "assign_adjuster"
+          ],
+          "escalate_to": "Claims supervisor"
+        },
+        "reason_quote": "Industry standard: claim frequency, a loss right after inception, inconsistent stories, and no documentation are the classic SIU referral triggers.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-6",
+        "text": "Intake never denies a claim; denial is an adjuster's decision in writing.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "status",
+            "op": "eq",
+            "value": "New"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "deny"
+          ]
+        },
+        "reason_quote": "Industry standard: a denial is a coverage determination with regulatory requirements; intake only records and routes.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-7",
+        "text": "Photos are requested at first contact for property and auto losses.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "loss_type",
+            "op": "in",
+            "value": [
+              "auto",
+              "property"
+            ]
+          },
+          {
+            "field": "photos_received",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "assign_adjuster"
+          ]
+        },
+        "reason_quote": "Industry standard: early photos are the cheapest fraud and severity control; the claim waits in Pending documents.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-ins-8",
+        "text": "Never tell the claimant whether the claim will be paid or how much.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "claimant",
+            "op": "present"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: intake sets expectations on process only; coverage statements by non-adjusters create bad-faith exposure.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "scheduling-coordinator": [
+      {
+        "id": "bl-sch-1",
+        "text": "Never book a provider into an overlapping slot.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "double_booked",
+            "op": "eq",
+            "value": "Yes"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "book",
+            "reschedule"
+          ]
+        },
+        "reason_quote": "Industry standard: a double booking costs two clients and the provider's trust; check the calendar before confirming, every time.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-2",
+        "text": "Cancellations with less than 24 hours notice carry the late fee unless a manager waives it.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "notice_hours",
+            "op": "lt",
+            "value": 24
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "waive_fee"
+          ],
+          "escalate_to": "Office manager"
+        },
+        "reason_quote": "Industry standard: 24 hours is the common cancellation window; the fee protects provider time, and waivers are a manager's goodwill call.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-3",
+        "text": "Clients with 2 or more no-shows must pay a deposit before the next booking.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "no_show_count",
+            "op": "gte",
+            "value": 2
+          },
+          {
+            "field": "deposit_paid",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "book"
+          ]
+        },
+        "reason_quote": "Industry standard: repeat no-shows are the main revenue leak; a deposit (often 50 percent) fixes it without losing the client.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-4",
+        "text": "Keep the provider's buffer between appointments; do not book into it.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "buffer_min",
+            "op": "lt",
+            "value": 10
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "book"
+          ]
+        },
+        "reason_quote": "Industry standard: 10 to 15 minute buffers absorb overruns; booking into them cascades delays for the rest of the day.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-5",
+        "text": "Same-day requests go on the waitlist unless a slot is genuinely open.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "notice_hours",
+            "op": "lt",
+            "value": 4
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "book"
+          ]
+        },
+        "reason_quote": "Industry standard: the waitlist fills cancellations in order; jumping it for whoever calls last is unfair and unmanageable.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-6",
+        "text": "Long services are booked in the provider's own slots, not squeezed before a hard stop.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "duration_min",
+            "op": "gt",
+            "value": 60
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: a 90-minute service started 45 minutes before close either runs over or gets cut short.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-sch-7",
+        "text": "Every booking gets a confirmation and a reminder 24 hours out.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "status",
+            "op": "eq",
+            "value": "Booked"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: reminders cut no-shows by a third or more; a booking without a confirmation is not really booked.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ],
+    "bookkeeping-assistant": [
+      {
+        "id": "bl-bk-1",
+        "text": "Never post to a closed period; flag it for the senior bookkeeper.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "period_closed",
+            "op": "eq",
+            "value": "Yes"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "categorize",
+            "post_journal",
+            "reconcile"
+          ],
+          "escalate_to": "Senior bookkeeper"
+        },
+        "reason_quote": "Industry standard: closed periods have been reported or filed; changing them silently breaks the audit trail and the tax return.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-2",
+        "text": "Expenses over $75 need a receipt attached before they are categorized as deductible.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "amount",
+            "op": "gt",
+            "value": 75
+          },
+          {
+            "field": "receipt_attached",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "categorize"
+          ]
+        },
+        "reason_quote": "Industry standard: $75 is the IRS documentation threshold; without a receipt the expense is requested, not categorized.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-3",
+        "text": "Transactions that look personal are flagged, not categorized as business expenses.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "personal_flag",
+            "op": "eq",
+            "value": "Yes"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "categorize"
+          ],
+          "escalate_to": "Senior bookkeeper"
+        },
+        "reason_quote": "Industry standard: owner personal spend goes to a draw or loan account; coding it as expense overstates deductions.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-4",
+        "text": "Journal entries above $5,000 need the senior bookkeeper's approval.",
+        "type": "limit",
+        "when": [
+          {
+            "field": "amount",
+            "op": "gt",
+            "value": 5000
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "post_journal"
+          ],
+          "escalate_to": "Senior bookkeeper"
+        },
+        "reason_quote": "Industry standard: manual journals bypass the normal document trail; large ones are reviewed by a second person.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-5",
+        "text": "Do not mark reconciled unless the statement balance matches to the cent.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "reconciled",
+            "op": "eq",
+            "value": "No"
+          }
+        ],
+        "then": {},
+        "reason_quote": "Industry standard: a forced reconciliation hides a real difference (a missing transaction, a bank fee); the difference is found, not plugged.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-6",
+        "text": "Uncategorized transactions older than 30 days are escalated, not guessed.",
+        "type": "judgment",
+        "when": [
+          {
+            "field": "status",
+            "op": "eq",
+            "value": "Uncategorized"
+          }
+        ],
+        "then": {
+          "escalate_to": "Senior bookkeeper"
+        },
+        "reason_quote": "Industry standard: guessing a category to clear the queue is worse than asking; a wrong category is invisible until year end.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      },
+      {
+        "id": "bl-bk-7",
+        "text": "Transfers between the company's own accounts are matched, never categorized as income or expense.",
+        "type": "guardrail",
+        "when": [
+          {
+            "field": "category",
+            "op": "eq",
+            "value": "Transfer"
+          }
+        ],
+        "then": {
+          "must_not_action": [
+            "categorize"
+          ]
+        },
+        "reason_quote": "Industry standard: double-counting transfers inflates both revenue and expenses; use Match or Transfer in the bank feed.",
+        "screen_moment": {
+          "t": 0
+        },
+        "source": "baseline",
+        "confirmed": false
+      }
+    ]
+  }
+}
