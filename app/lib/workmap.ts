@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import type { OpenGap, Rule, ScreenEvent, TranscriptLine, WorkMap } from "@understudy/shared";
+import { auditHeaders } from "@/lib/audit";
 
 const KEY = (jobId: string) => `understudy:workmap:${jobId}`;
 const subs = new Set<() => void>();
@@ -109,7 +110,7 @@ export async function rebuildWorkMap(input: {
   const previous = workMaps.get(input.jobId) ?? (await seedWorkMap(input.jobId, input.expert)) ?? undefined;
   const res = await fetch("/api/workmap", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...auditHeaders() },
     body: JSON.stringify({
       job_id: input.jobId,
       expert: input.expert,

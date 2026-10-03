@@ -7,6 +7,7 @@ import type { ApprenticeAgent } from "@understudy/voice";
 import { screenEvents } from "@/lib/session";
 import { rebuildWorkMap, useWorkMap } from "@/lib/workmap";
 import { sessionStats } from "@/lib/stats";
+import { auditHeaders, logAudit } from "@/lib/audit";
 
 const TICK_MS = 250;
 const RECENT_EVENTS = 20;
@@ -98,7 +99,10 @@ export function useInterviewLoop(opts: {
         msSinceSpeech: speech.msSinceSpeech,
         msSinceScreenChange: t - lastScreenChange.current,
       });
-      setGateOpen((prev) => (prev === g.open ? prev : g.open));
+      setGateOpen((prev) => {
+        if (prev !== g.open && g.open) logAudit("gate_open", { reason: g.reason, t }, "expertai");
+        return prev === g.open ? prev : g.open;
+      });
       if (!g.open || !dirty.current || inFlight.current || a.status !== "connected") return;
 
       dirty.current = false;
@@ -106,7 +110,7 @@ export function useInterviewLoop(opts: {
       try {
         const res = await fetch("/api/question", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...auditHeaders() },
           body: JSON.stringify({
             job_id: jobId,
             recent: screenEvents.all().slice(-RECENT_EVENTS),
