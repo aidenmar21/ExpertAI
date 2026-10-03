@@ -2,3 +2,9 @@ node_modules/
 .DS_Store
 __pycache__/
 *.log
+node_modules/
+.next/
+.env.local
+.env
+*.log
+.DS_Store

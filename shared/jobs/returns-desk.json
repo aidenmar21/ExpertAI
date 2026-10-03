@@ -1,0 +1,69 @@
+{
+  "_readme": "Job profile for the bookstore returns desk. All data is fake. hidden_rules are PLACEHOLDERS: replace them with Aarav's real rules from the rule-mining questions. hidden_rules is the answer key and must never be sent to the agent.",
+  "job": {
+    "id": "returns-desk",
+    "name": "Returns desk",
+    "category": "Retail",
+    "business_date": "2026-10-03",
+    "written_policy": "Returns accepted within 30 days with a receipt. Items must be in resaleable condition. Refunds go to the original payment method.",
+    "escalate_to": "Shift manager"
+  },
+  "screen": {
+    "record_type": "return",
+    "fields": [
+      { "key": "receipt_no", "label": "Receipt no.", "type": "text" },
+      { "key": "customer", "label": "Customer", "type": "text", "pii": true },
+      { "key": "card", "label": "Card", "type": "text", "pii": true },
+      { "key": "item", "label": "Item", "type": "text" },
+      { "key": "price", "label": "Price", "type": "money" },
+      { "key": "purchase_date", "label": "Purchased", "type": "date" },
+      { "key": "condition", "label": "Condition", "type": "select", "options": ["New", "Opened", "Damaged", "Defective"] },
+      { "key": "refund_method", "label": "Refund to", "type": "select", "options": ["Original card", "Cash", "Store credit"] },
+      { "key": "status", "label": "Status", "type": "status", "options": ["Open", "Refunded", "Store credit issued", "Denied", "Waiting for manager"] }
+    ],
+    "actions": [
+      { "key": "refund", "label": "Refund", "sets": { "status": "Refunded" } },
+      { "key": "store_credit", "label": "Store credit", "sets": { "status": "Store credit issued", "refund_method": "Store credit" } },
+      { "key": "call_manager", "label": "Call manager", "sets": { "status": "Waiting for manager" } },
+      { "key": "deny", "label": "Deny", "sets": { "status": "Denied" } }
+    ]
+  },
+  "catalog": [
+    { "sku": "B-1001", "name": "Novel: The Lighthouse Keeper", "price": 24.00, "type": "book" },
+    { "sku": "T-2001", "name": "Intro to Biology textbook + access code", "price": 189.00, "type": "textbook_access_code" },
+    { "sku": "T-2002", "name": "Calculus textbook (no code)", "price": 142.00, "type": "textbook" },
+    { "sku": "M-3001", "name": "University hoodie", "price": 54.00, "type": "merch" },
+    { "sku": "M-3002", "name": "Ceramic mug", "price": 14.00, "type": "merch" },
+    { "sku": "E-4001", "name": "Graphing calculator", "price": 119.00, "type": "electronics" }
+  ],
+  "customers": [
+    { "id": "C-01", "name": "Jordan Ellis", "card": "Visa ending 4417" },
+    { "id": "C-02", "name": "Priya Raman", "card": "Mastercard ending 0932" },
+    { "id": "C-03", "name": "Sam Okafor", "card": "Visa ending 7781" }
+  ],
+  "return_history": [
+    { "customer_id": "C-03", "date": "2026-09-14", "sku": "M-3002" },
+    { "customer_id": "C-03", "date": "2026-09-26", "sku": "B-1001" }
+  ],
+  "expert_session_cases": [
+    { "case": "X1", "receipt_no": "R-88101", "customer_id": "C-01", "sku": "B-1001", "purchase_date": "2026-09-28", "condition": "New", "paid_with": "card", "expected": "Refund to card. Routine: agent should stay silent." },
+    { "case": "X2", "receipt_no": "R-88102", "customer_id": "C-02", "sku": "T-2001", "purchase_date": "2026-09-20", "condition": "Opened", "paid_with": "card", "expected": "Deny: access code opened. Agent should ask why." },
+    { "case": "X3", "receipt_no": null, "customer_id": "C-01", "sku": "M-3001", "purchase_date": null, "condition": "New", "paid_with": "unknown", "expected": "Store credit only (no receipt). Agent should ask about the limit." },
+    { "case": "X4", "receipt_no": "R-88104", "customer_id": "C-02", "sku": "M-3002", "purchase_date": "2026-09-30", "condition": "New", "paid_with": "card", "customer_asks_for": "cash", "expected": "Refund to card, not cash. Agent asks whether there are exceptions." }
+  ],
+  "new_hire_test_cases": [
+    { "case": "N1", "receipt_no": "R-88201", "customer_id": "C-02", "sku": "T-2002", "purchase_date": "2026-09-25", "condition": "New", "paid_with": "card", "trap": "$142 refund: needs a manager." },
+    { "case": "N2", "receipt_no": "R-88202", "customer_id": "C-03", "sku": "M-3001", "purchase_date": "2026-09-29", "condition": "New", "paid_with": "card", "trap": "Third return this month by the same customer: call a manager." },
+    { "case": "N3", "receipt_no": null, "customer_id": "C-01", "sku": "E-4001", "purchase_date": null, "condition": "New", "paid_with": "unknown", "customer_asks_for": "cash", "trap": "No receipt and wants cash: store credit only (and over $100: manager)." },
+    { "case": "N4", "receipt_no": "R-88204", "customer_id": "C-01", "sku": "E-4001", "purchase_date": "2026-09-27", "condition": "Defective", "paid_with": "card", "trap": "Defective item: offer an exchange first. Good moment for the stuck trigger." },
+    { "case": "N5", "receipt_no": "R-88205", "customer_id": "C-02", "sku": "B-1001", "purchase_date": "2026-10-01", "condition": "New", "paid_with": "card", "trap": "None. Routine refund: tutor must stay silent." }
+  ],
+  "hidden_rules": [
+    { "id": "R1", "rule": "PLACEHOLDER: No receipt means store credit only, at the lowest recent price.", "type": "guardrail" },
+    { "id": "R2", "rule": "PLACEHOLDER: Textbook with an opened access code is not refundable.", "type": "exception" },
+    { "id": "R3", "rule": "PLACEHOLDER: Refunds over $100 need a manager override.", "type": "limit" },
+    { "id": "R4", "rule": "PLACEHOLDER: Card payments refund to the card, never cash.", "type": "guardrail" },
+    { "id": "R5", "rule": "PLACEHOLDER: Third return by the same customer in 30 days: call a manager.", "type": "judgment" },
+    { "id": "R6", "rule": "PLACEHOLDER: Defective item: offer an exchange before a refund.", "type": "judgment" }
+  ]
+}

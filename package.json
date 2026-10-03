@@ -1,0 +1,8 @@
+{
+  "name": "understudy",
+  "private": true,
+  "workspaces": ["shared", "engine", "voice", "brain", "app"],
+  "scripts": {
+    "dev": "npm run dev --workspace app"
+  }
+}

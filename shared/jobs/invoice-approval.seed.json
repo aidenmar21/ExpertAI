@@ -1,0 +1,105 @@
+{
+  "_readme": "Fake data for the AI Apprentice sandbox ERP. All companies, people and IBANs are fictional. 'hidden_rules' is ground truth for YOUR evaluation only - never feed it to the agent; the agent must discover these rules from the expert.",
+  "company": {
+    "name": "Brenner Maschinenbau GmbH",
+    "location": "Esslingen, near Stuttgart",
+    "currency": "EUR",
+    "business_date": "2026-12-29",
+    "context": "Two days before month-end close"
+  },
+  "users": [
+    { "id": "U1", "name": "Sabine Keller", "role": "Senior AP clerk (expert)", "approval_limit_eur": 10000 },
+    { "id": "U2", "name": "Lena Vogt", "role": "New AP clerk (new hire)", "approval_limit_eur": 10000 },
+    { "id": "U3", "name": "Thomas Brandt", "role": "Controller", "approval_limit_eur": null }
+  ],
+  "cost_centers": [
+    { "code": "4711", "type": "opex", "name": "Maintenance and repairs" },
+    { "code": "4720", "type": "opex", "name": "Office and consumables" },
+    { "code": "4800", "type": "opex", "name": "Freight and logistics" },
+    { "code": "0400", "type": "capex", "name": "Machinery and equipment", "requires_asset_number": true }
+  ],
+  "suppliers": [
+    { "id": "S-1001", "name": "Hartmann Werkzeuge GmbH", "country": "DE", "iban": "DE89 3704 0044 0532 0130 00", "contact": "Jens Hartmann" },
+    { "id": "S-1002", "name": "Kovotech s.r.o.", "country": "CZ", "intercompany": true, "iban": "CZ65 0800 0000 1920 0014 5399", "contact": "Petra Novotna" },
+    { "id": "S-1003", "name": "Rhein-Logistik AG", "country": "DE", "iban": "DE44 5001 0517 5407 3249 31", "contact": "Markus Weber" },
+    { "id": "S-1005", "name": "Buerobedarf Schulz", "country": "DE", "iban": "DE02 1203 0000 0000 2020 51", "contact": "Anke Schulz" }
+  ],
+  "posted_history": [
+    { "invoice_no": "4466", "supplier_id": "S-1003", "date": "2026-12-01", "description": "Freight Esslingen-Brno, Nov week 4", "amount_eur": 3180.00, "delivery_note": "DN-8812", "cost_center": "4800", "status": "Paid" }
+  ],
+  "expert_session_invoices": [
+    {
+      "invoice_no": "4471", "supplier_id": "S-1001", "date": "2026-12-18",
+      "description": "Hydraulic press tooling set, model HP-40",
+      "amount_eur": 6450.00, "cost_center": "4711", "asset_number": "AN-2291",
+      "po_number": "PO-77310", "delivery_note": "DN-9031", "status": "Open",
+      "expected_expert_action": "Re-code 4711 -> 0400 (equipment over 5,000 is capex), then approve"
+    },
+    {
+      "invoice_no": "4472", "supplier_id": "S-1003", "date": "2026-12-22",
+      "description": "Freight Esslingen-Brno, Nov week 4",
+      "amount_eur": 3180.00, "cost_center": "4800", "asset_number": null,
+      "po_number": null, "delivery_note": "DN-8812", "status": "Open",
+      "expected_expert_action": "Put on hold - same delivery note as paid invoice 4466; this supplier double-bills in December"
+    },
+    {
+      "invoice_no": "4473", "supplier_id": "S-1002", "date": "2026-12-20",
+      "description": "Machined gearbox housings, batch 12",
+      "amount_eur": 2940.00, "cost_center": "4711", "asset_number": null,
+      "po_number": "PO-77288", "delivery_note": "DN-9007", "status": "Open",
+      "expected_expert_action": "Send for second approval to controller (Czech subsidiary / intercompany)"
+    },
+    {
+      "invoice_no": "4474", "supplier_id": "S-1005", "date": "2026-12-21",
+      "description": "Printer toner and paper",
+      "amount_eur": 212.40, "cost_center": "4720", "asset_number": null,
+      "po_number": null, "delivery_note": null, "status": "Open",
+      "expected_expert_action": "Approve as-is (happy path - the agent should NOT ask about this one)"
+    }
+  ],
+  "new_hire_test_invoices": [
+    {
+      "invoice_no": "4490", "supplier_id": "S-1001", "date": "2026-12-27",
+      "description": "Laser shaft alignment system",
+      "amount_eur": 7200.00, "cost_center": "4711", "asset_number": "AN-2307",
+      "po_number": "PO-77402", "delivery_note": "DN-9120", "status": "Open",
+      "trap": "Pre-coded as opex. Correct: re-code to 0400 capex."
+    },
+    {
+      "invoice_no": "4491", "supplier_id": null, "supplier_name_on_invoice": "Novak Praezision GmbH",
+      "date": "2026-12-27", "description": "Calibration service",
+      "amount_eur": 1150.00, "cost_center": "4711", "asset_number": null,
+      "po_number": null, "delivery_note": null, "status": "Open",
+      "trap": "Supplier not in master data. Correct: stop and ask the controller."
+    },
+    {
+      "invoice_no": "4492", "supplier_id": "S-1001", "date": "2026-12-28",
+      "description": "Pneumatic clamping station",
+      "amount_eur": 8900.00, "cost_center": "4711", "asset_number": null,
+      "po_number": "PO-77415", "delivery_note": "DN-9133", "status": "Open",
+      "trap": "Capex amount but no asset number. Correct: do not book; request asset number."
+    },
+    {
+      "invoice_no": "4493", "supplier_id": "S-1002", "date": "2026-12-28",
+      "description": "Machined gearbox housings, batch 13",
+      "amount_eur": 12400.00, "cost_center": "4711", "asset_number": null,
+      "po_number": "PO-77420", "delivery_note": "DN-9140", "status": "Open",
+      "trap": "Intercompany AND above the 10,000 approval limit. Correct: controller approval."
+    },
+    {
+      "invoice_no": "4494", "supplier_id": "S-1005", "date": "2026-12-28",
+      "description": "Desk chairs (2)",
+      "amount_eur": 640.00, "cost_center": "4720", "asset_number": null,
+      "po_number": null, "delivery_note": null, "status": "Open",
+      "trap": "None. Correct: approve. Tests that the tutor does not over-warn."
+    }
+  ],
+  "hidden_rules": [
+    { "id": "R1", "rule": "Equipment over 5,000 EUR is always capex (0400).", "type": "judgment" },
+    { "id": "R2", "rule": "No asset number, no capex booking - request it from the requester.", "type": "guardrail" },
+    { "id": "R3", "rule": "Rhein-Logistik December invoices: hold and compare delivery note against paid history; controller decides release.", "type": "exception" },
+    { "id": "R4", "rule": "Kovotech (Czech subsidiary) always needs a second approval from the controller.", "type": "guardrail" },
+    { "id": "R5", "rule": "Unknown supplier: stop and ask the controller.", "type": "guardrail" },
+    { "id": "R6", "rule": "Anything above 10,000 EUR needs controller approval.", "type": "limit" }
+  ]
+}

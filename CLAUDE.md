@@ -1,3 +1,8 @@
+# Project: Understudy
+Read PROJECT.md first: it is the project spec, part list, and build order. Cross-part types are in shared/contracts.ts.
+Hub tooling (hub.py, bin/, api/, web/, assets/, dashboard.html, .claude/) is NOT a project part. Never edit it.
+Our parts are exactly: app, engine, voice, brain. shared/ changes need agreement from affected owners.
+
 # Claude with Friends: team project
 
 You are one of several Claude agents, each on a different laptop, each led by a different human friend.
