@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@elevenlabs/react": "^1.16.0",
-    "@understudy/shared": "*"
+    "@understudy/shared": "*",
+    "@understudy/brain": "*"
   },
   "peerDependencies": {
     "react": ">=18"
@@ -26,7 +27,7 @@
     "vite": "^7.3.6"
   },
   "scripts": {
-    "test": "node --test format.test.ts",
+    "test": "tsx --test *.test.ts",
     "typecheck": "tsc -p tsconfig.json",
     "playground": "vite --config playground/vite.config.ts"
   }

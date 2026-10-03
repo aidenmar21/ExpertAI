@@ -1,23 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentContextMessage, ScreenEvent, TranscriptLine, Value } from "../../shared/contracts";
-import { deliveryFor, formatContext, useApprenticeAgent, type AgentMode, type Delivery } from "../index";
-import { editableFields, profile, records, sampleMap, sampleRule } from "./samples";
+import type { CheckResult, ScreenEvent, Value } from "../../shared/contracts";
+import { checkAction } from "@understudy/brain";
+import { useApprenticeAgent, type AgentMode, type OutboxEntry, type VoiceTranscriptLine } from "../index";
+import { editableFields, profile, records, sampleMap } from "./samples";
 
-type Sent = { id: number; at: number; text: string; delivery: Delivery; outcome: "sent" | "queued" | "dropped" | "held" };
-type Entry = { at: number; sent?: Sent; line?: TranscriptLine };
+type Entry = { at: number; sent?: OutboxEntry; line?: VoiceTranscriptLine; key: string };
 
 const PHASES = ["idle", "asking", "teach_back", "confirmed"] as const;
 const PHASE_LABEL: Record<(typeof PHASES)[number], string> = {
   idle: "Not started",
-  asking: "Asking gaps",
+  asking: "Asking",
   teach_back: "Teach-back",
   confirmed: "Confirmed",
 };
-const OUTCOME_LABEL: Record<Sent["outcome"], string> = {
+const OUTCOME_LABEL: Record<OutboxEntry["outcome"], string> = {
   sent: "",
-  queued: "Queued until connected",
-  dropped: "Not sent: agent not connected",
-  held: "Held back: off the record",
+  queued: "Queued",
+  dropped: "Not sent",
+  held: "Held back",
+  throttled: "Skipped",
 };
 
 let seq = 0;
@@ -27,20 +28,32 @@ export function App() {
   const [expert, setExpert] = useState("Aarav");
   const [agentId, setAgentId] = useState("");
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
-  const [sent, setSent] = useState<Sent[]>([]);
   const [recordIx, setRecordIx] = useState(0);
   const [record, setRecord] = useState<Record<string, Value>>(records[0]);
   const [question, setQuestion] = useState("Why did you send that one back to the original card?");
   const [guardrailQ, setGuardrailQ] = useState(false);
   const [hint, setHint] = useState("deciding between Refund and Call manager on a $129 return");
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
+  const [notes, setNotes] = useState<string[]>([]);
+  const [typedLine, setTypedLine] = useState("");
   const sessionStart = useRef(Date.now());
+
+  const map = useMemo(() => ({ ...sampleMap, expert }), [expert]);
 
   const agent = useApprenticeAgent(mode, {
     expert,
+    escalateTo: profile.job.escalate_to,
+    workMap: mode === "tutor" ? map : null,
     agentId: agentId.trim() || undefined,
     now: () => Date.now() - sessionStart.current,
+    onTeachBackConfirmed: () => note("Teach-back confirmed. The app would now call confirmWorkMap()."),
+    onReplayRequested: (c) => note(c ? `Replay requested: ${expert}'s moment on ${c.screen_moment?.record ?? "the record"}.` : "Replay requested, but no guardrail is active."),
+    onNewCase: (s) => note(`New case flagged: ${s}`),
   });
+
+  function note(text: string) {
+    setNotes((n) => [...n.slice(-3), text]);
+  }
 
   useEffect(() => {
     fetch("/api/voice/health").then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
@@ -63,20 +76,11 @@ export function App() {
   }, [agent.getSpeechSignals, agent.getHesitationWords]);
 
   const connected = agent.status === "connected";
+  const send = agent.sendContext;
+  const now = () => Date.now() - sessionStart.current;
 
-  function send(m: AgentContextMessage) {
-    const delivery = deliveryFor(m);
-    const outcome: Sent["outcome"] =
-      m.kind === "screen_event" && agent.offRecord ? "held" : connected ? "sent" : delivery === "context" ? "queued" : "dropped";
-    setSent((s) => [...s, { id: ++seq, at: Date.now() - sessionStart.current, text: formatContext(m, { expert }), delivery, outcome }]);
-    agent.sendContext(m);
-  }
-
-  function screenEvent(e: Omit<ScreenEvent, "id" | "t" | "confidence" | "record">) {
-    send({
-      kind: "screen_event",
-      event: { id: `ev-${++seq}`, t: Date.now() - sessionStart.current, confidence: 1, record: String(record.receipt_no), ...e },
-    });
+  function screenEvent(e: Omit<ScreenEvent, "id" | "t" | "confidence" | "record">, rec = record) {
+    send({ kind: "screen_event", event: { id: `ev-${++seq}`, t: now(), confidence: 1, record: String(rec.receipt_no), ...e } });
   }
 
   function changeField(key: string, label: string, to: Value) {
@@ -86,7 +90,7 @@ export function App() {
     screenEvent({ type: key === "status" ? "status_changed" : "field_changed", field: key, from, to, detail: `${label} changed` });
   }
 
-  function runAction(key: string) {
+  function applyAction(key: string) {
     const action = profile.screen.actions.find((a) => a.key === key)!;
     for (const [field, to] of Object.entries(action.sets)) {
       const label = editableFields.find((f) => f.key === field)?.label ?? field;
@@ -94,34 +98,45 @@ export function App() {
     }
   }
 
+  // Tutor mode: brain checks the action before it saves. Not ok = block + tell the tutor.
+  function runAction(key: string) {
+    if (mode === "tutor") {
+      const check: CheckResult = checkAction({ action: key, record }, map);
+      if (!check.ok) {
+        send({ kind: "guardrail_hit", check });
+        return;
+      }
+      if (agent.activeGuardrail) agent.resolveGuardrail();
+    }
+    applyAction(key);
+  }
+
   function openNextRecord() {
     const ix = (recordIx + 1) % records.length;
+    const next = records[ix];
     setRecordIx(ix);
-    setRecord(records[ix]);
-    send({
-      kind: "screen_event",
-      event: {
-        id: `ev-${++seq}`,
-        t: Date.now() - sessionStart.current,
-        type: "record_opened",
-        record: String(records[ix].receipt_no),
-        confidence: 1,
-        detail: `${profile.screen.record_type} ${records[ix].receipt_no} opened: ${records[ix].item}, $${records[ix].price}`,
-      },
-    });
+    setRecord(next);
+    if (agent.activeGuardrail) agent.resolveGuardrail();
+    screenEvent(
+      { type: "record_opened", detail: `${profile.screen.record_type} ${next.receipt_no} opened: ${next.item}, $${next.price}` },
+      next,
+    );
   }
 
   function startSession() {
     sessionStart.current = Date.now();
     agent.reset();
-    setSent([]);
+    setNotes([]);
     agent.start();
   }
 
   const timeline = useMemo<Entry[]>(() => {
-    const items: Entry[] = [...sent.map((s) => ({ at: s.at, sent: s })), ...agent.transcript.map((l) => ({ at: l.t, line: l }))];
+    const items: Entry[] = [
+      ...agent.outbox.map((s) => ({ at: s.t, sent: s, key: `s${s.id}` })),
+      ...agent.transcript.map((l, i) => ({ at: l.t, line: l, key: `l${i}` })),
+    ];
     return items.sort((a, b) => a.at - b.at);
-  }, [sent, agent.transcript]);
+  }, [agent.outbox, agent.transcript]);
 
   const feedRef = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -132,13 +147,18 @@ export function App() {
   const neededEnv = health && !agentId.trim() ? requiredEnv.filter((k) => !health[k]) : [];
   const gateOpen = !speech.isSpeaking && speech.msSinceSpeech >= 1500;
   const phaseIx = PHASES.indexOf(agent.debrief);
+  const guard = agent.activeGuardrail;
 
   return (
     <div className="shell">
       <header className="top">
         <div>
           <h1>Voice test bench</h1>
-          <p className="lede">Talk to the {mode} agent, change the record, and see exactly what the agent is told.</p>
+          <p className="lede">
+            {mode === "interviewer"
+              ? "Work the record while the interviewer watches, then run the debrief and teach-back."
+              : "Work the record as a new hire. Saves are checked against the Work Map before they go through."}
+          </p>
         </div>
         <label className="theme">
           <span className="sr-only">Theme</span>
@@ -164,7 +184,7 @@ export function App() {
           </div>
 
           <label className="field">
-            <span>Expert name</span>
+            <span>{mode === "interviewer" ? "Expert name" : "Expert who taught the tutor"}</span>
             <input value={expert} onChange={(e) => setExpert(e.target.value)} />
           </label>
           <label className="field">
@@ -174,7 +194,7 @@ export function App() {
 
           {neededEnv.length > 0 && (
             <p className="notice">
-              Add {neededEnv.join(" and ")} to <code>app/.env.local</code> or <code>voice/.env.local</code> and restart the bench, or paste a public agent ID.
+              Add {neededEnv.join(" and ")} to <code>voice/.env.local</code> and restart the bench, or paste a public agent ID.
             </p>
           )}
 
@@ -189,6 +209,20 @@ export function App() {
             </button>
           </div>
           {agent.error && <p className="notice error" role="alert">{agent.error}</p>}
+
+          <form
+            className="say"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (agent.say(typedLine)) setTypedLine("");
+            }}
+          >
+            <label className="field grow">
+              <span>Type instead of talking</span>
+              <input value={typedLine} onChange={(e) => setTypedLine(e.target.value)} disabled={!connected} placeholder={connected ? "What did I just change?" : "Start a session first"} />
+            </label>
+            <button className="btn" type="submit" disabled={!connected || !typedLine.trim()}>Say</button>
+          </form>
 
           <dl className="readout">
             <div>
@@ -218,14 +252,37 @@ export function App() {
             )}
           </dl>
 
-          <div>
-            <h3>Debrief</h3>
-            <ol className="phases">
-              {PHASES.map((p, i) => (
-                <li key={p} className={i < phaseIx ? "done" : i === phaseIx ? "current" : ""}>{PHASE_LABEL[p]}</li>
-              ))}
-            </ol>
-          </div>
+          {mode === "interviewer" && (
+            <div className="debrief">
+              <h3>Debrief</h3>
+              <ol className="phases">
+                {PHASES.map((p, i) => (
+                  <li key={p} className={i < phaseIx ? "done" : i === phaseIx ? "current" : ""}>{PHASE_LABEL[p]}</li>
+                ))}
+              </ol>
+              {agent.debriefPlan.length > 0 && (
+                <ol className="plan">
+                  {agent.debriefPlan.map((q, i) => (
+                    <li key={q.id} className={i < agent.debriefIndex ? "done" : i === agent.debriefIndex ? "current" : ""}>
+                      {q.question}
+                      {q.is_guardrail && <span className="tag">Guardrail</span>}
+                    </li>
+                  ))}
+                  <li className={agent.debriefIndex >= agent.debriefPlan.length ? "current" : ""}>Teach-back</li>
+                </ol>
+              )}
+              {agent.debrief === "asking" && (
+                <button className="btn ghost" onClick={agent.nextDebriefQuestion}>
+                  {agent.debriefIndex >= agent.debriefPlan.length - 1 ? "Skip to teach-back" : "Skip to next question"}
+                </button>
+              )}
+              {agent.teachBack && (
+                <blockquote className={`teachback ${agent.debrief === "confirmed" ? "ok" : ""}`}>
+                  {agent.teachBack}
+                </blockquote>
+              )}
+            </div>
+          )}
         </section>
 
         {/* ---------- Screen + prompts ---------- */}
@@ -236,7 +293,24 @@ export function App() {
             </h2>
             <button className="btn ghost" onClick={openNextRecord}>Open next {profile.screen.record_type}</button>
           </div>
-          <p className="hint">Each change goes to the agent as silent context. Then ask it out loud: “What did I just change?”</p>
+          <p className="hint">
+            {mode === "interviewer"
+              ? "Each change goes to the agent as silent context. Ask it out loud: “What did I just change?”"
+              : "Try Refund on R-88131 ($129). The tutor should stop you and explain in the expert's words."}
+          </p>
+
+          {guard && (
+            <div className="blocked" role="alert">
+              <p className="blocked-title">Save paused: {guard.rule?.text ?? "this breaks a rule"}</p>
+              {guard.rule?.reason_quote && <p className="quote">“{guard.rule.reason_quote}” <span>— {expert}</span></p>}
+              <div className="row wrap">
+                <button className="btn" onClick={() => note(`Replay requested: ${expert}'s moment on ${guard.screen_moment?.record ?? "the record"}.`)}>
+                  Replay {expert}'s moment
+                </button>
+                <button className="btn ghost" onClick={agent.resolveGuardrail}>Dismiss</button>
+              </div>
+            </div>
+          )}
 
           <div className="record">
             {editableFields.map((f) => (
@@ -267,40 +341,45 @@ export function App() {
           </div>
 
           <h3>Make the agent speak</h3>
-          <div className="prompt">
-            <label className="field grow">
-              <span>Question</span>
-              <input value={question} onChange={(e) => setQuestion(e.target.value)} />
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={guardrailQ} onChange={(e) => setGuardrailQ(e.target.checked)} />
-              Guardrail
-            </label>
-            <button
-              className="btn turn"
-              onClick={() => send({ kind: "ask_now", pick: { question, about_event_id: "manual", is_guardrail: guardrailQ } })}
-            >
-              Ask now
-            </button>
-          </div>
-          <div className="prompt">
-            <label className="field grow">
-              <span>Stuck hint</span>
-              <input value={hint} onChange={(e) => setHint(e.target.value)} />
-            </label>
-            <button className="btn turn" onClick={() => send({ kind: "stuck", hint })}>Send stuck</button>
-          </div>
-          <div className="row wrap">
-            <button className="btn turn" onClick={() => send({ kind: "guardrail_hit", check: { ok: false, rule: sampleRule, clip_id: sampleRule.clip_id, screen_moment: sampleRule.screen_moment } })}>
-              Hit guardrail
-            </button>
-            <button className="btn turn" onClick={() => send({ kind: "start_debrief", gaps: sampleMap.open_gaps, map: { ...sampleMap, expert } })}>
-              Start debrief
-            </button>
-            <button className="btn turn" onClick={() => send({ kind: "off_record", on: !agent.offRecord })}>
-              {agent.offRecord ? "Go back on the record" : "Go off the record"}
-            </button>
-          </div>
+          {mode === "interviewer" ? (
+            <>
+              <div className="prompt">
+                <label className="field grow">
+                  <span>Question</span>
+                  <input value={question} onChange={(e) => setQuestion(e.target.value)} />
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={guardrailQ} onChange={(e) => setGuardrailQ(e.target.checked)} />
+                  Guardrail
+                </label>
+                <button className="btn turn" onClick={() => send({ kind: "ask_now", pick: { question, about_event_id: "manual", is_guardrail: guardrailQ } })}>
+                  Ask now
+                </button>
+              </div>
+              <div className="row wrap">
+                <button className="btn turn" onClick={() => send({ kind: "start_debrief", gaps: map.open_gaps, map })}>
+                  Start debrief
+                </button>
+                <button className="btn turn" onClick={() => send({ kind: "off_record", on: !agent.offRecord })}>
+                  {agent.offRecord ? "Go back on the record" : "Go off the record"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="prompt">
+              <label className="field grow">
+                <span>Stuck hint</span>
+                <input value={hint} onChange={(e) => setHint(e.target.value)} />
+              </label>
+              <button className="btn turn" onClick={() => send({ kind: "stuck", hint })}>Send stuck</button>
+            </div>
+          )}
+
+          {(notes.length > 0 || agent.newCases.length > 0) && (
+            <ul className="notes" aria-live="polite">
+              {notes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
         </section>
 
         {/* ---------- Timeline ---------- */}
@@ -316,17 +395,22 @@ export function App() {
             <p className="empty">Start a session, then change a field. Every message appears here exactly as the agent receives it, next to what was said.</p>
           ) : (
             <ol className="timeline" ref={feedRef} aria-live="polite">
-              {timeline.map((e, i) =>
+              {timeline.map((e) =>
                 e.sent ? (
-                  <li key={`s${e.sent.id}`} className={`sent ${e.sent.delivery} ${e.sent.outcome}`}>
+                  <li key={e.key} className={`sent ${e.sent.delivery} ${e.sent.outcome}`}>
                     <time>{fmt(e.at)}</time>
                     <pre>{e.sent.text}</pre>
-                    {e.sent.outcome !== "sent" && <span className="outcome">{OUTCOME_LABEL[e.sent.outcome]}</span>}
+                    {e.sent.outcome !== "sent" && (
+                      <span className="outcome">{OUTCOME_LABEL[e.sent.outcome]}{e.sent.reason ? `: ${e.sent.reason}` : ""}</span>
+                    )}
                   </li>
                 ) : (
-                  <li key={`l${i}`} className={`line ${e.line!.speaker} ${e.line!.off_record ? "offrec" : ""}`}>
+                  <li key={e.key} className={`line ${e.line!.speaker} ${e.line!.off_record ? "offrec" : ""}`}>
                     <time>{fmt(e.at)}</time>
-                    <span className="who">{e.line!.speaker === "agent" ? "Agent" : e.line!.speaker === "expert" ? expert || "Expert" : "New hire"}</span>
+                    <span className="who">
+                      {e.line!.speaker === "agent" ? "Agent" : e.line!.speaker === "expert" ? expert || "Expert" : "New hire"}
+                      {e.line!.about_event_id && <span className="about"> about {e.line!.about_event_id}</span>}
+                    </span>
                     <p>{e.line!.text}</p>
                     {e.line!.off_record && <span className="outcome">Off the record</span>}
                   </li>

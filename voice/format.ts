@@ -25,6 +25,10 @@ function show(v: Value | undefined): string {
   return String(v);
 }
 
+function sentence(s: string): string {
+  return /[.!?"]$/.test(s) ? s : `${s}.`;
+}
+
 function oneLine(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
@@ -71,13 +75,19 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
 
     case "guardrail_hit": {
       const { check } = m;
-      const parts = [`[GUARDRAIL] The new hire is about to break a rule. Their save is paused. ${expert} would stop here.`];
+      const parts = [
+        `[GUARDRAIL] The new hire is about to break a rule. Their save is paused.`,
+        `Say only: "${expert} would stop here. Why do you think?" Then stop talking and wait for their answer.`,
+        `After they answer, explain with ${expert}'s reason below, quoting them.`,
+      ];
+      const quote = check.rule?.reason_quote ? oneLine(check.rule.reason_quote) : "";
       if (check.rule) {
-        parts.push(`Rule: ${oneLine(check.rule.text)}.`);
-        if (check.rule.reason_quote) parts.push(`${expert} said: "${oneLine(check.rule.reason_quote)}".`);
-        if (check.rule.then.escalate_to) parts.push(`Escalate to: ${check.rule.then.escalate_to}.`);
+        parts.push(sentence(`Rule: ${oneLine(check.rule.text)}`));
+        if (quote) parts.push(`${expert} said: "${quote}"`);
+        if (check.rule.then.escalate_to) parts.push(sentence(`Escalate to: ${check.rule.then.escalate_to}`));
       }
-      if (check.explanation) parts.push(`Why: ${oneLine(check.explanation)}.`);
+      // brain's explanation repeats the rule and quote; only add it when it says something new.
+      if (check.explanation && !(quote && check.explanation.includes(quote))) parts.push(sentence(`Why: ${oneLine(check.explanation)}`));
       if (check.clip_id || check.screen_moment) parts.push(`A replay of ${expert}'s screen moment is available.`);
       return parts.join(" ");
     }

@@ -221,3 +221,29 @@ input:disabled { opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Debrief plan */
+.debrief { display: grid; gap: var(--s3); }
+.debrief h3 { margin: var(--s3) 0 0; }
+.plan { margin: 0; padding-left: 20px; display: grid; gap: var(--s2); font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.plan li::marker { font-weight: 650; }
+.plan li.done { color: color-mix(in srgb, var(--ink-2) 70%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--teal) 60%, transparent); }
+.plan li.current { color: var(--ink); font-weight: 600; }
+.plan li.current::marker { color: var(--teal); }
+.tag { display: inline-block; margin-left: var(--s2); padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 650; line-height: 18px; background: var(--amber-soft); color: var(--amber); vertical-align: 1px; }
+.debrief .btn { justify-self: start; }
+.teachback { margin: 0; padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--indigo-soft); border-left: 3px solid var(--indigo); font-size: 14px; }
+.teachback.ok { background: var(--teal-soft); border-color: var(--teal); }
+
+/* Tutor: blocked save */
+.blocked { display: grid; gap: var(--s3); padding: var(--s4); margin-bottom: var(--s4); border-radius: var(--r-md); background: var(--amber-soft); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); animation: enter 220ms var(--ease); }
+.blocked-title { font-weight: 650; color: var(--amber); }
+.quote { font-size: 15px; line-height: 1.55; max-width: 60ch; }
+.quote span { color: var(--ink-2); font-size: 13px; }
+
+.notes { list-style: none; margin: var(--s4) 0 0; padding: 0; display: grid; gap: var(--s2); }
+.notes li { font-size: 13px; padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--teal-soft); color: var(--ink); }
+
+.line .about { font-weight: 500; color: var(--ink-2); }
+
+.say { display: flex; gap: var(--s2); align-items: flex-end; }

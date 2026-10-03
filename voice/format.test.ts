@@ -75,7 +75,7 @@ test("debrief lists gaps, steps, rules", () => {
 test("guardrail quotes the expert", () => {
   const text = formatContext({ kind: "guardrail_hit", check: { ok: false, rule, clip_id: "c1" } }, { expert: "Aarav" });
   assert.match(text, /^\[GUARDRAIL\]/);
-  assert.match(text, /Aarav would stop here/);
+  assert.match(text, /Say only: "Aarav would stop here\. Why do you think\?" Then stop talking/);
   assert.match(text, /Aarav said: "Anything over a hundred, I get Dana\."/);
   assert.match(text, /Escalate to: Shift manager/);
   assert.match(text, /replay/);
