@@ -3,5 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "main": "index.ts",
-  "types": "index.ts"
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./server": "./server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@understudy/shared": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  },
+  "scripts": {
+    "test": "tsx test/loop.test.ts"
+  }
 }

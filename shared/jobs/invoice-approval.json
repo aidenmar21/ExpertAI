@@ -1,0 +1,502 @@
+{
+  "_readme": "Job profile for AP invoice approval, converted from invoice-approval.seed.json by brain. All data is fake. hidden_rules is the answer key and must never be sent to the agent.",
+  "job": {
+    "id": "invoice-approval",
+    "name": "Invoice approval",
+    "category": "Finance / Accounts payable",
+    "business_date": "2026-12-29",
+    "written_policy": "Invoices are checked against PO and delivery note, coded to the correct cost center, and approved within your approval limit. Currency EUR.",
+    "escalate_to": "Controller"
+  },
+  "screen": {
+    "record_type": "invoice",
+    "fields": [
+      {
+        "key": "invoice_no",
+        "label": "Invoice no.",
+        "type": "text"
+      },
+      {
+        "key": "supplier",
+        "label": "Supplier",
+        "type": "text"
+      },
+      {
+        "key": "supplier_iban",
+        "label": "IBAN",
+        "type": "text",
+        "pii": true
+      },
+      {
+        "key": "description",
+        "label": "Description",
+        "type": "text"
+      },
+      {
+        "key": "amount",
+        "label": "Amount (EUR)",
+        "type": "money"
+      },
+      {
+        "key": "date",
+        "label": "Invoice date",
+        "type": "date"
+      },
+      {
+        "key": "cost_center",
+        "label": "Cost center",
+        "type": "select",
+        "options": [
+          "4711",
+          "4720",
+          "4800",
+          "0400"
+        ]
+      },
+      {
+        "key": "asset_number",
+        "label": "Asset no.",
+        "type": "text"
+      },
+      {
+        "key": "po_number",
+        "label": "PO no.",
+        "type": "text"
+      },
+      {
+        "key": "delivery_note",
+        "label": "Delivery note",
+        "type": "text"
+      },
+      {
+        "key": "status",
+        "label": "Status",
+        "type": "status",
+        "options": [
+          "Open",
+          "Approved",
+          "On hold",
+          "Waiting for controller",
+          "Info requested"
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "key": "approve",
+        "label": "Approve",
+        "sets": {
+          "status": "Approved"
+        }
+      },
+      {
+        "key": "hold",
+        "label": "Put on hold",
+        "sets": {
+          "status": "On hold"
+        }
+      },
+      {
+        "key": "send_to_controller",
+        "label": "Send to controller",
+        "sets": {
+          "status": "Waiting for controller"
+        }
+      },
+      {
+        "key": "request_info",
+        "label": "Request info",
+        "sets": {
+          "status": "Info requested"
+        }
+      }
+    ]
+  },
+  "company": {
+    "name": "Brenner Maschinenbau GmbH",
+    "location": "Esslingen, near Stuttgart",
+    "currency": "EUR",
+    "business_date": "2026-12-29",
+    "context": "Two days before month-end close"
+  },
+  "users": [
+    {
+      "id": "U1",
+      "name": "Sabine Keller",
+      "role": "Senior AP clerk (expert)",
+      "approval_limit_eur": 10000
+    },
+    {
+      "id": "U2",
+      "name": "Lena Vogt",
+      "role": "New AP clerk (new hire)",
+      "approval_limit_eur": 10000
+    },
+    {
+      "id": "U3",
+      "name": "Thomas Brandt",
+      "role": "Controller",
+      "approval_limit_eur": null
+    }
+  ],
+  "cost_centers": [
+    {
+      "code": "4711",
+      "type": "opex",
+      "name": "Maintenance and repairs"
+    },
+    {
+      "code": "4720",
+      "type": "opex",
+      "name": "Office and consumables"
+    },
+    {
+      "code": "4800",
+      "type": "opex",
+      "name": "Freight and logistics"
+    },
+    {
+      "code": "0400",
+      "type": "capex",
+      "name": "Machinery and equipment",
+      "requires_asset_number": true
+    }
+  ],
+  "suppliers": [
+    {
+      "id": "S-1001",
+      "name": "Hartmann Werkzeuge GmbH",
+      "country": "DE",
+      "iban": "DE89 3704 0044 0532 0130 00",
+      "contact": "Jens Hartmann"
+    },
+    {
+      "id": "S-1002",
+      "name": "Kovotech s.r.o.",
+      "country": "CZ",
+      "intercompany": true,
+      "iban": "CZ65 0800 0000 1920 0014 5399",
+      "contact": "Petra Novotna"
+    },
+    {
+      "id": "S-1003",
+      "name": "Rhein-Logistik AG",
+      "country": "DE",
+      "iban": "DE44 5001 0517 5407 3249 31",
+      "contact": "Markus Weber"
+    },
+    {
+      "id": "S-1005",
+      "name": "Buerobedarf Schulz",
+      "country": "DE",
+      "iban": "DE02 1203 0000 0000 2020 51",
+      "contact": "Anke Schulz"
+    }
+  ],
+  "posted_history": [
+    {
+      "invoice_no": "4466",
+      "supplier_id": "S-1003",
+      "date": "2026-12-01",
+      "description": "Freight Esslingen-Brno, Nov week 4",
+      "amount_eur": 3180.0,
+      "delivery_note": "DN-8812",
+      "cost_center": "4800",
+      "status": "Paid"
+    }
+  ],
+  "expert_session_cases": [
+    {
+      "case": "4471",
+      "invoice_no": "4471",
+      "supplier": "Hartmann Werkzeuge GmbH",
+      "supplier_id": "S-1001",
+      "date": "2026-12-18",
+      "description": "Hydraulic press tooling set, model HP-40",
+      "amount": 6450.0,
+      "cost_center": "4711",
+      "asset_number": "AN-2291",
+      "po_number": "PO-77310",
+      "delivery_note": "DN-9031",
+      "status": "Open",
+      "expected": "Re-code 4711 -> 0400 (equipment over 5,000 is capex), then approve"
+    },
+    {
+      "case": "4472",
+      "invoice_no": "4472",
+      "supplier": "Rhein-Logistik AG",
+      "supplier_id": "S-1003",
+      "date": "2026-12-22",
+      "description": "Freight Esslingen-Brno, Nov week 4",
+      "amount": 3180.0,
+      "cost_center": "4800",
+      "asset_number": null,
+      "po_number": null,
+      "delivery_note": "DN-8812",
+      "status": "Open",
+      "expected": "Put on hold - same delivery note as paid invoice 4466; this supplier double-bills in December"
+    },
+    {
+      "case": "4473",
+      "invoice_no": "4473",
+      "supplier": "Kovotech s.r.o.",
+      "supplier_id": "S-1002",
+      "date": "2026-12-20",
+      "description": "Machined gearbox housings, batch 12",
+      "amount": 2940.0,
+      "cost_center": "4711",
+      "asset_number": null,
+      "po_number": "PO-77288",
+      "delivery_note": "DN-9007",
+      "status": "Open",
+      "expected": "Send for second approval to controller (Czech subsidiary / intercompany)"
+    },
+    {
+      "case": "4474",
+      "invoice_no": "4474",
+      "supplier": "Buerobedarf Schulz",
+      "supplier_id": "S-1005",
+      "date": "2026-12-21",
+      "description": "Printer toner and paper",
+      "amount": 212.4,
+      "cost_center": "4720",
+      "asset_number": null,
+      "po_number": null,
+      "delivery_note": null,
+      "status": "Open",
+      "expected": "Approve as-is (happy path - the agent should NOT ask about this one)"
+    }
+  ],
+  "new_hire_test_cases": [
+    {
+      "case": "4490",
+      "invoice_no": "4490",
+      "supplier": "Hartmann Werkzeuge GmbH",
+      "supplier_id": "S-1001",
+      "date": "2026-12-27",
+      "description": "Laser shaft alignment system",
+      "amount": 7200.0,
+      "cost_center": "4711",
+      "asset_number": "AN-2307",
+      "po_number": "PO-77402",
+      "delivery_note": "DN-9120",
+      "status": "Open",
+      "trap": "Pre-coded as opex. Correct: re-code to 0400 capex."
+    },
+    {
+      "case": "4491",
+      "invoice_no": "4491",
+      "supplier": "Novak Praezision GmbH",
+      "supplier_id": null,
+      "date": "2026-12-27",
+      "description": "Calibration service",
+      "amount": 1150.0,
+      "cost_center": "4711",
+      "asset_number": null,
+      "po_number": null,
+      "delivery_note": null,
+      "status": "Open",
+      "trap": "Supplier not in master data. Correct: stop and ask the controller."
+    },
+    {
+      "case": "4492",
+      "invoice_no": "4492",
+      "supplier": "Hartmann Werkzeuge GmbH",
+      "supplier_id": "S-1001",
+      "date": "2026-12-28",
+      "description": "Pneumatic clamping station",
+      "amount": 8900.0,
+      "cost_center": "4711",
+      "asset_number": null,
+      "po_number": "PO-77415",
+      "delivery_note": "DN-9133",
+      "status": "Open",
+      "trap": "Capex amount but no asset number. Correct: do not book; request asset number."
+    },
+    {
+      "case": "4493",
+      "invoice_no": "4493",
+      "supplier": "Kovotech s.r.o.",
+      "supplier_id": "S-1002",
+      "date": "2026-12-28",
+      "description": "Machined gearbox housings, batch 13",
+      "amount": 12400.0,
+      "cost_center": "4711",
+      "asset_number": null,
+      "po_number": "PO-77420",
+      "delivery_note": "DN-9140",
+      "status": "Open",
+      "trap": "Intercompany AND above the 10,000 approval limit. Correct: controller approval."
+    },
+    {
+      "case": "4494",
+      "invoice_no": "4494",
+      "supplier": "Buerobedarf Schulz",
+      "supplier_id": "S-1005",
+      "date": "2026-12-28",
+      "description": "Desk chairs (2)",
+      "amount": 640.0,
+      "cost_center": "4720",
+      "asset_number": null,
+      "po_number": null,
+      "delivery_note": null,
+      "status": "Open",
+      "trap": "None. Correct: approve. Tests that the tutor does not over-warn."
+    }
+  ],
+  "hidden_rules": [
+    {
+      "id": "R1",
+      "rule": "Equipment over 5,000 EUR is always capex (0400).",
+      "type": "judgment"
+    },
+    {
+      "id": "R2",
+      "rule": "No asset number, no capex booking - request it from the requester.",
+      "type": "guardrail"
+    },
+    {
+      "id": "R3",
+      "rule": "Rhein-Logistik December invoices: hold and compare delivery note against paid history; controller decides release.",
+      "type": "exception"
+    },
+    {
+      "id": "R4",
+      "rule": "Kovotech (Czech subsidiary) always needs a second approval from the controller.",
+      "type": "guardrail"
+    },
+    {
+      "id": "R5",
+      "rule": "Unknown supplier: stop and ask the controller.",
+      "type": "guardrail"
+    },
+    {
+      "id": "R6",
+      "rule": "Anything above 10,000 EUR needs controller approval.",
+      "type": "limit"
+    }
+  ],
+  "records": {
+    "expert": [
+      {
+        "invoice_no": "4471",
+        "supplier": "Hartmann Werkzeuge GmbH",
+        "supplier_iban": "DE89 3704 0044 0532 0130 00",
+        "description": "Hydraulic press tooling set, model HP-40",
+        "amount": 6450.0,
+        "date": "2026-12-18",
+        "cost_center": "4711",
+        "asset_number": "AN-2291",
+        "po_number": "PO-77310",
+        "delivery_note": "DN-9031",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4472",
+        "supplier": "Rhein-Logistik AG",
+        "supplier_iban": "DE44 5001 0517 5407 3249 31",
+        "description": "Freight Esslingen-Brno, Nov week 4",
+        "amount": 3180.0,
+        "date": "2026-12-22",
+        "cost_center": "4800",
+        "asset_number": null,
+        "po_number": null,
+        "delivery_note": "DN-8812",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4473",
+        "supplier": "Kovotech s.r.o.",
+        "supplier_iban": "CZ65 0800 0000 1920 0014 5399",
+        "description": "Machined gearbox housings, batch 12",
+        "amount": 2940.0,
+        "date": "2026-12-20",
+        "cost_center": "4711",
+        "asset_number": null,
+        "po_number": "PO-77288",
+        "delivery_note": "DN-9007",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4474",
+        "supplier": "Buerobedarf Schulz",
+        "supplier_iban": "DE02 1203 0000 0000 2020 51",
+        "description": "Printer toner and paper",
+        "amount": 212.4,
+        "date": "2026-12-21",
+        "cost_center": "4720",
+        "asset_number": null,
+        "po_number": null,
+        "delivery_note": null,
+        "status": "Open"
+      }
+    ],
+    "new_hire": [
+      {
+        "invoice_no": "4490",
+        "supplier": "Hartmann Werkzeuge GmbH",
+        "supplier_iban": "DE89 3704 0044 0532 0130 00",
+        "description": "Laser shaft alignment system",
+        "amount": 7200.0,
+        "date": "2026-12-27",
+        "cost_center": "4711",
+        "asset_number": "AN-2307",
+        "po_number": "PO-77402",
+        "delivery_note": "DN-9120",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4491",
+        "supplier": "Novak Praezision GmbH",
+        "supplier_iban": null,
+        "description": "Calibration service",
+        "amount": 1150.0,
+        "date": "2026-12-27",
+        "cost_center": "4711",
+        "asset_number": null,
+        "po_number": null,
+        "delivery_note": null,
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4492",
+        "supplier": "Hartmann Werkzeuge GmbH",
+        "supplier_iban": "DE89 3704 0044 0532 0130 00",
+        "description": "Pneumatic clamping station",
+        "amount": 8900.0,
+        "date": "2026-12-28",
+        "cost_center": "4711",
+        "asset_number": null,
+        "po_number": "PO-77415",
+        "delivery_note": "DN-9133",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4493",
+        "supplier": "Kovotech s.r.o.",
+        "supplier_iban": "CZ65 0800 0000 1920 0014 5399",
+        "description": "Machined gearbox housings, batch 13",
+        "amount": 12400.0,
+        "date": "2026-12-28",
+        "cost_center": "4711",
+        "asset_number": null,
+        "po_number": "PO-77420",
+        "delivery_note": "DN-9140",
+        "status": "Open"
+      },
+      {
+        "invoice_no": "4494",
+        "supplier": "Buerobedarf Schulz",
+        "supplier_iban": "DE02 1203 0000 0000 2020 51",
+        "description": "Desk chairs (2)",
+        "amount": 640.0,
+        "date": "2026-12-28",
+        "cost_center": "4720",
+        "asset_number": null,
+        "po_number": null,
+        "delivery_note": null,
+        "status": "Open"
+      }
+    ]
+  }
+}
