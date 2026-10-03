@@ -8,7 +8,7 @@ export interface RuleCandidate {
   record_id: string;
   text: string;
   type: RuleType;
-  when: { field: string; op: string; value: unknown }[];
+  when: { field: string; op: string; value: unknown; evidence?: string }[];   // evidence: words in reason_quote that state this condition
   must: { field: string; value: string | number | null }[];
   must_not: { field: string; value: string | number | null }[];
   must_not_action: string[];
@@ -33,6 +33,11 @@ export const RULE_TYPES: RuleType[] = ["judgment", "guardrail", "exception", "li
 export const OPS: Op[] = ["eq", "neq", "gt", "gte", "lt", "lte", "in", "missing", "present"];
 const NUMERIC: Op[] = ["gt", "gte", "lt", "lte"];
 const UNIVERSAL = /\b(always|every|any|all|never|no matter)\b/i;
+
+// Sentences of an expert answer. A rule's quote must sit inside one, so two independent statements don't merge.
+export function sentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+}
 
 export function normQuote(s: string): string {
   return s.toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z0-9$€.']+/g, " ").trim();
@@ -107,6 +112,9 @@ export function validateCandidates(cands: RuleCandidate[], o: ValidateOptions): 
     const q = normQuote(c.reason_quote ?? "");
     const qi = q.length >= 8 ? rec.quotes.findIndex((x) => normQuote(x).includes(q)) : -1;
     if (qi < 0) { reject(c, "reason_quote is not the expert's exact words from this record"); continue; }
+    if (!sentences(rec.quotes[qi]).some((x) => normQuote(x).includes(q))) {
+      reject(c, "reason_quote spans more than one sentence; quote the single sentence that states this rule"); continue;
+    }
 
     // 2. Conditions: supported op, real field, right value shape.
     if (!RULE_TYPES.includes(c.type)) { reject(c, `unsupported rule type ${c.type}`); continue; }
@@ -114,6 +122,10 @@ export function validateCandidates(cands: RuleCandidate[], o: ValidateOptions): 
     let err: string | null = null;
     for (const w of c.when) {
       const op = w.op as Op;
+      const ev = normQuote(w.evidence ?? "");
+      if (!ev || !q.includes(ev)) {
+        err = `condition ${w.field} ${w.op} is not stated in the rule's own quote "${c.reason_quote}" (evidence: ${JSON.stringify(w.evidence ?? "")})`; break;
+      }
       if (!OPS.includes(op)) { err = `unsupported op "${w.op}"`; break; }
       if (!fields.has(w.field)) { err = `field "${w.field}" is not on screen`; break; }
       if (op === "missing" || op === "present") { when.push({ field: w.field, op }); continue; }

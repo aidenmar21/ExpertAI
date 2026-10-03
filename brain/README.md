@@ -68,12 +68,13 @@ if (!res.ok) { blockSave(); sendContext({ kind: "guardrail_hit", check: res }); 
 ## Rule validation (every model rule)
 A rule is rejected unless all of these hold:
 1. It comes from a decision the expert explained (`why != null`).
-2. `reason_quote` is an exact substring of that record's quotes, at least 8 characters. Evidence records which quote and its transcript `t` (`map.rule_sources[rule.id]`).
-3. Every op is in the contract's `Op`, and the value fits the op (number for gt/gte/lt/lte, a non-empty list for `in`).
-4. Every field is on the job's screen, and select/status values are real options. Actions are real job actions.
-5. It has a checkable outcome (`must`, `must_not`, `must_not_action`, or `escalate_to`).
-6. No conditions only if the expert said always, every, any, all, or never.
-7. It doesn't block a decision the expert actually made on another case in the session (over-breadth check).
+2. `reason_quote` is an exact substring of that record's quotes, at least 8 characters, and stays inside one sentence. Evidence records which quote and its transcript `t` (`map.rule_sources[rule.id]`).
+3. Every condition carries `evidence`: words inside its own `reason_quote` that state it. Independent sentences in one answer can't lend each other conditions (e.g. "No receipt means store credit only. If it's over a hundred dollars I call the shift manager." gives two rules, not one narrowed rule).
+4. Every op is in the contract's `Op`, and the value fits the op (number for gt/gte/lt/lte, a non-empty list for `in`).
+5. Every field is on the job's screen, and select/status values are real options. Actions are real job actions.
+6. It has a checkable outcome (`must`, `must_not`, `must_not_action`, or `escalate_to`).
+7. No conditions only if the expert said always, every, any, all, or never.
+8. It doesn't block a decision the expert actually made on another case in the session (over-breadth check).
 
 ## Proposed `shared/contracts.ts` additions
 Additive and optional, so no current consumer breaks. Aarav (app) agreed. Waiting on the voice owner (voice consumes WorkMap).
@@ -105,5 +106,5 @@ export interface Correction { record_id: string; text: string; t: number }
 Until then these types are exported from `@understudy/brain`.
 
 ## Tests
-- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected), confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
-- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, and a $100 -> $200 correction. Exits 2 if no key is found.
+- `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
+- `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, and a two-sentence answer that must give two separate rules. Exits 2 if no key is found.

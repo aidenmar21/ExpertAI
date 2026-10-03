@@ -57,20 +57,20 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
   });
   const ACCESS = "Intro to Biology textbook + access code";
   const cands: RuleCandidate[] = [
-    C({ record_id: x2.id, text: "Opened access codes are not refundable", when: [{ field: "condition", op: "eq", value: "Opened" }, { field: "item", op: "eq", value: ACCESS }], must_not_action: ["refund"], reason_quote: "Opened access codes are never refundable" }),
-    C({ text: "No receipt: store credit only", when: [{ field: "receipt_no", op: "missing", value: null }], must: [{ field: "refund_method", value: "Store credit" }], reason_quote: "No receipt means store credit only" }),
-    C({ text: "Over $100: shift manager before refund", type: "stop_and_ask", when: [{ field: "price", op: "gt", value: 100 }], must_not_action: ["refund", "store_credit"], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager before I give anything back" }),
+    C({ record_id: x2.id, text: "Opened access codes are not refundable", when: [{ field: "condition", op: "eq", value: "Opened", evidence: "Opened" }, { field: "item", op: "eq", value: ACCESS, evidence: "access codes" }], must_not_action: ["refund"], reason_quote: "Opened access codes are never refundable" }),
+    C({ text: "No receipt: store credit only", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }], must: [{ field: "refund_method", value: "Store credit" }], reason_quote: "No receipt means store credit only" }),
+    C({ text: "Over $100: shift manager before refund", type: "stop_and_ask", when: [{ field: "price", op: "gt", value: 100, evidence: "over a hundred dollars" }], must_not_action: ["refund", "store_credit"], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager before I give anything back" }),
     // each of these must be rejected:
-    C({ text: "invented quote", when: [{ field: "price", op: "gt", value: 50 }], must_not_action: ["refund"], reason_quote: "Anything over fifty is suspicious" }),
-    C({ text: "unknown field", when: [{ field: "loyalty_tier", op: "eq", value: "gold" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
-    C({ record_id: x4.id, text: "unexplained decision", when: [{ field: "card", op: "present", value: null }], must_not: [{ field: "refund_method", value: "Cash" }], reason_quote: "I don't know" }),
-    C({ text: "unsupported op", when: [{ field: "item", op: "contains", value: "code" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
-    C({ text: "non-numeric limit", when: [{ field: "price", op: "gt", value: "a hundred" }], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager" }),
-    C({ text: "bad option", when: [{ field: "receipt_no", op: "missing", value: null }], must: [{ field: "refund_method", value: "Gift card" }], reason_quote: "No receipt means store credit only" }),
-    C({ text: "unknown action", when: [{ field: "receipt_no", op: "missing", value: null }], must_not_action: ["void"], reason_quote: "No receipt means store credit only" }),
+    C({ text: "invented quote", when: [{ field: "price", op: "gt", value: 50, evidence: "fifty" }], must_not_action: ["refund"], reason_quote: "Anything over fifty is suspicious" }),
+    C({ text: "unknown field", when: [{ field: "loyalty_tier", op: "eq", value: "gold", evidence: "No receipt" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
+    C({ record_id: x4.id, text: "unexplained decision", when: [{ field: "card", op: "present", value: null, evidence: "know" }], must_not: [{ field: "refund_method", value: "Cash" }], reason_quote: "I don't know" }),
+    C({ text: "unsupported op", when: [{ field: "item", op: "contains", value: "code", evidence: "No receipt" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
+    C({ text: "non-numeric limit", when: [{ field: "price", op: "gt", value: "a hundred", evidence: "over a hundred dollars" }], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager" }),
+    C({ text: "bad option", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }], must: [{ field: "refund_method", value: "Gift card" }], reason_quote: "No receipt means store credit only" }),
+    C({ text: "unknown action", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }], must_not_action: ["void"], reason_quote: "No receipt means store credit only" }),
     C({ text: "no conditions", must: [{ field: "refund_method", value: "Store credit" }], reason_quote: "No receipt means store credit only" }),
-    C({ text: "escalate-only over $100", type: "stop_and_ask", when: [{ field: "price", op: "gt", value: 100 }], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager" }),
-    C({ record_id: "dr-nope", text: "unknown record", when: [{ field: "price", op: "gt", value: 1 }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
+    C({ text: "escalate-only over $100", type: "stop_and_ask", when: [{ field: "price", op: "gt", value: 100, evidence: "over a hundred dollars" }], escalate_to: "Shift manager", reason_quote: "over a hundred dollars I call the shift manager" }),
+    C({ record_id: "dr-nope", text: "unknown record", when: [{ field: "price", op: "gt", value: 1, evidence: "No receipt" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
   ];
   const v = validateCandidates(cands, { job, records: recs, cases });
   assert.deepEqual(v.rules.map((r) => r.text), ["Opened access codes are not refundable", "No receipt: store credit only", "Over $100: shift manager before refund"]);
@@ -92,6 +92,22 @@ delete process.env.ANTHROPIC_API_KEY;   // guarantee no model call in this file
     assert.ok(rec.quotes[e.quote_index].includes(r.reason_quote) && e.quote_t !== null, "evidence links the exact quote and its time");
   }
   console.log(`ok validation: kept ${v.rules.length}, rejected ${v.rejected.length} of ${cands.length} SIMULATED candidates`);
+
+  // 3b. Two independent sentences in ONE answer (Aarav's live case): conditions can't cross sentences.
+  const one = captureDecisions({ events: [ev("k1", 1_000, undefined, "refund_to", null, "Store credit")], transcript: [
+    { t: 2_000, speaker: "agent", text: "Why store credit?" },
+    { t: 3_000, speaker: "expert", text: "No receipt means store credit only. If it's over a hundred dollars I call the shift manager." }] });
+  const oid = one[0].id;
+  const narrow = validateCandidates([
+    C({ record_id: oid, text: "over $100 with no receipt", type: "stop_and_ask", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }, { field: "price", op: "gt", value: 100, evidence: "over a hundred dollars" }], must_not_action: ["refund"], escalate_to: "Shift manager", reason_quote: "If it's over a hundred dollars I call the shift manager" }),
+    C({ record_id: oid, text: "spans sentences", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }, { field: "price", op: "gt", value: 100, evidence: "over a hundred dollars" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only. If it's over a hundred dollars" }),
+    C({ record_id: oid, text: "over $100", type: "stop_and_ask", when: [{ field: "price", op: "gt", value: 100, evidence: "over a hundred dollars" }], must_not_action: ["refund"], escalate_to: "Shift manager", reason_quote: "If it's over a hundred dollars I call the shift manager" }),
+    C({ record_id: oid, text: "no receipt", when: [{ field: "receipt_no", op: "missing", value: null, evidence: "No receipt" }], must_not_action: ["refund"], reason_quote: "No receipt means store credit only" }),
+  ], { job, records: one });
+  assert.deepEqual(narrow.rules.map((r) => r.text), ["over $100", "no receipt"]);
+  assert.match(narrow.rejected[0].reason, /receipt_no missing is not stated in the rule's own quote/);
+  assert.match(narrow.rejected[1].reason, /more than one sentence/);
+  console.log("ok sentence scope: cross-sentence condition rejected, both independent rules kept");
 
   // 4. Tutor enforcement: only confirmed rules restrict.
   const nh = (job.records as { new_hire: Record<string, string | number | null>[] }).new_hire;

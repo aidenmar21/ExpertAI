@@ -83,8 +83,9 @@ const RULES_SCHEMA = {
                 field: { type: "string" },
                 op: { type: "string", enum: OPS },
                 value: { anyOf: [SCALAR, { type: "array", items: SCALAR }] },
+                evidence: { type: "string" },
               },
-              required: ["field", "op", "value"],
+              required: ["field", "op", "value", "evidence"],
               additionalProperties: false,
             },
           },
@@ -106,7 +107,8 @@ const RULES_SCHEMA = {
 const SYSTEM = `You turn an expert's spoken explanations into checkable work rules.
 Strict grounding:
 - Use ONLY what the expert said in the decision records' quotes. Never add rules from general knowledge or the written policy alone.
-- reason_quote must be copied verbatim (a contiguous substring) from one of that record's quotes.
+- reason_quote must be copied verbatim (a contiguous substring) from one of that record's quotes, and stay inside ONE sentence.
+- Every condition needs "evidence": the exact words inside reason_quote that state it (e.g. "over a hundred dollars" for price gt 100, "access codes" for the item condition). A condition whose words are not in reason_quote is not allowed, even if the expert said them in another sentence.
 - If a record's why is null, produce no rule for it.
 - Conditions use only the listed screen field keys; actions use only the listed action keys; select values only from the field's options.
 - A rule with no conditions applies to every case, so only emit when=[] if the expert said "always" or "never".

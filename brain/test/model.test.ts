@@ -92,5 +92,21 @@ const show = (m: WorkMapWithRecords) => {
   assert.equal(after.big.ok, false, "$250 blocked by the corrected limit");
   assert.equal(after.N3.ok, false, "no-receipt rule restated in the correction still holds");
 
+  // 6. Aarav's live case: two independent rules in ONE answer must not merge their conditions.
+  t0 = Date.now();
+  const one = confirmWorkMap(await buildWorkMap({ job_id: "returns-desk", expert: "Aarav",
+    events: [{ id: "k1", t: 1_000, type: "field_changed", field: "refund_to", from: null, to: "Store credit", confidence: 0.9, detail: "refund to store credit" }],
+    transcript: [
+      { t: 2_000, speaker: "agent", text: "Why store credit there?" },
+      { t: 3_000, speaker: "expert", text: "No receipt means store credit only. If it's over a hundred dollars I call the shift manager." },
+    ] }));
+  console.log(`\n[4] one answer, two sentences: ${one.rules.length} rules, ${one.rejected_rules!.length} rejected, ${Date.now() - t0}ms`);
+  show(one);
+  assert.ok(!one.rules.some((x) => x.when.some((c) => c.field === "receipt_no") && x.when.some((c) => c.field === "price")), "no merged receipt+price rule");
+  const withReceipt = check(one, "refund", nh[0]);   // $142 WITH a receipt
+  console.log(`    $142 refund with receipt ${withReceipt.ok ? "ALLOWED" : "BLOCKED"}, N3 no-receipt refund ${check(one, "refund", nh[2]).ok ? "ALLOWED" : "BLOCKED"}`);
+  assert.equal(withReceipt.ok, false, "$100 rule applies with a receipt too");
+  assert.equal(check(one, "refund", nh[2]).ok, false, "no-receipt rule applies");
+
   console.log("\nALL REAL-MODEL CHECKS PASS");
 })().catch((e) => { console.error(e); process.exit(1); });
