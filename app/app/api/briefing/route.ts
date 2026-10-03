@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { briefingFor, knowledgeForJob } from "@understudy/brain/server";
+import { appendAudit, briefingFor, knowledgeForJob, sessionFromHeaders } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/job";
 
 const KB_FILE = path.join(process.cwd(), "..", "data", "kb.json");
@@ -36,6 +36,15 @@ export async function POST(request: Request) {
   let kb: { doc_id: string; synced: boolean; error?: string } | null = null;
   if (briefing && process.env.EXPERTAI_KB_SYNC !== "0" && process.env.ELEVENLABS_API_KEY) {
     kb = await syncKnowledgeBase(id, `ExpertAI briefing: ${job.job.name}`, briefing).catch((e: Error) => ({ doc_id: "", synced: false, error: e.message }));
+  }
+  try {
+    appendAudit(sessionFromHeaders(request.headers), {
+      actor: "system",
+      type: "session_start",
+      payload: { job_id: id, job_name: job.job.name, briefing_words: briefing ? briefing.split(/\s+/).length : 0, kb_synced: kb?.synced ?? false, role_id: job.job.role_id ?? null },
+    });
+  } catch (err) {
+    console.error("[api/briefing] audit", err);
   }
   return Response.json({ briefing, role, software, kb });
 }

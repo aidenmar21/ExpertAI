@@ -62,3 +62,96 @@ function recordsFor(profile: JobProfile): ClientJob["records"] {
   const newHire = caseArrays.find(([k]) => k.startsWith("new_hire"))?.[1] ?? [];
   return { expert: expert.map(pick), new_hire: newHire.map(pick) };
 }
+
+// ---------- Jobs dashboard + "New job" wizard (per-job data stays JSON in shared/jobs) ----------
+import { knowledgeIndex, roleById, softwareById } from "@understudy/brain/server";
+
+export interface CreateJobInput {
+  name: string;
+  role_id?: string | null;
+  software_ids?: string[];
+  written_policy?: string;
+  escalate_to?: string;
+  category?: string;
+  business_date?: string;
+}
+
+/** What the dashboard shows per job: names resolved from knowledge/index.json via role_id / software_ids. */
+export interface JobSummary {
+  id: string;
+  name: string;
+  category: string;
+  business_date: string;
+  escalate_to: string;
+  role: { id: string; name: string } | null;
+  software: { id: string; name: string }[];
+  record_type: string;
+  screen_fields: number;
+  has_written_policy: boolean;
+}
+
+export const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+export const todayISO = () => new Date().toISOString().slice(0, 10);
+
+export function jobSummary(id: string): JobSummary {
+  const p = loadJob(id);
+  const role = roleById(p.job.role_id);
+  const ids = p.job.software_ids ?? role?.software ?? [];
+  return {
+    id: p.job.id,
+    name: p.job.name,
+    category: p.job.category,
+    business_date: p.job.business_date,
+    escalate_to: p.job.escalate_to,
+    role: role ? { id: role.id, name: role.name } : null,
+    software: ids.map((s) => softwareById(s)).filter((s): s is NonNullable<typeof s> => !!s).map((s) => ({ id: s.id, name: s.name })),
+    record_type: p.screen.record_type,
+    screen_fields: p.screen.fields.length,
+    has_written_policy: p.job.written_policy.trim().length > 0,
+  };
+}
+
+export const listJobSummaries = (): JobSummary[] => listJobIds().map(jobSummary);
+
+/**
+ * Create shared/jobs/<id>.json from the wizard's choices. The screen starts empty: app discovery fills
+ * fields and actions on the first screen share. Throws "exists" if the id is taken, "invalid" if unusable.
+ */
+export function createJob(input: CreateJobInput): JobProfile {
+  const name = (input.name ?? "").trim();
+  const id = slugify(name);
+  if (!name || !id) throw new Error("invalid");
+  if (listJobIds().includes(id) || fs.existsSync(path.join(JOBS_DIR, `${id}.json`))) throw new Error("exists");
+
+  const index = knowledgeIndex();
+  const role = roleById(input.role_id ?? undefined);
+  const known = new Set(index.software.map((s) => s.id));
+  const software_ids = (input.software_ids ?? role?.software ?? []).filter((s) => known.has(s));
+
+  const profile: JobProfile = {
+    _readme: `Job profile for ${name}. Created by the New job wizard; the screen map is filled by app discovery on the first screen share. hidden_rules is the answer key (scoring only).`,
+    job: {
+      id,
+      name,
+      category: (input.category ?? role?.category ?? "General").trim() || "General",
+      business_date: /^\d{4}-\d{2}-\d{2}$/.test(input.business_date ?? "") ? (input.business_date as string) : todayISO(),
+      written_policy: (input.written_policy ?? "").trim(),
+      escalate_to: (input.escalate_to ?? role?.escalate_to ?? "Manager").trim() || "Manager",
+      ...(role ? { role_id: role.id } : {}),
+      software_ids,
+    },
+    screen: { record_type: role?.record_type ?? "record", fields: [], actions: [] },
+    records: { expert: [], new_hire: [] },
+    hidden_rules: [],
+  };
+  fs.mkdirSync(JOBS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(JOBS_DIR, `${id}.json`), JSON.stringify(profile, null, 2) + "\n");
+  return profile;
+}

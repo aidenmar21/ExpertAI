@@ -410,3 +410,6 @@ export function scoreSession(input: Omit<ScoreInput, "job"> & { job_id: string }
 export function redactTranscriptForJob(job_id: string, transcript: TranscriptLine[]): TranscriptLine[] {
   return redactTranscript(transcript, piiValues(loadJob(job_id)));
 }
+
+// Audit log (append-only, hash-chained session ledger at data/audit/<session>.jsonl).
+export * from "./audit";

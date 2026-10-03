@@ -1,6 +1,6 @@
 import type { JobProfile } from "@understudy/shared";
 import { discoverScreen } from "@understudy/engine/server";
-import { knowledgeForJob, softwareVocabulary } from "@understudy/brain/server";
+import { appendAudit, knowledgeForJob, logModelCall, sessionFromHeaders, softwareVocabulary } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/job";
 
 export interface DiscoveredField { key: string; label: string; type: string; options?: string[]; known: boolean; }
@@ -21,7 +21,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "expected { job_id, frame_jpeg_base64 }" }, { status: 400 });
   }
   const job = loadJob(id);
+  const session = sessionFromHeaders(request.headers);
+  const started = Date.now();
   const screen: JobProfile["screen"] = await discoverScreen(body.frame_jpeg_base64);
+  const latency_ms = Date.now() - started;
   const { software } = knowledgeForJob(job);
   const vocab = softwareVocabulary(software.map((s) => s.id));
   const known = (label: string) => {
@@ -30,5 +33,20 @@ export async function POST(request: Request) {
   };
   const fields: DiscoveredField[] = screen.fields.map((f) => ({ ...f, known: known(f.label) }));
   const actions = screen.actions.map((a) => ({ ...a, known: known(a.label) }));
+  try {
+    logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "discover-v1", latency_ms, redacted: true, purpose: "discover" });
+    appendAudit(session, {
+      actor: "expertai",
+      type: "discovery",
+      payload: {
+        job_id: id, record_type: screen.record_type,
+        n_fields: fields.length, n_actions: actions.length,
+        fields: fields.map((f) => f.label), actions: actions.map((a) => a.label),
+        known_fields: fields.filter((f) => f.known).length, known_actions: actions.filter((a) => a.known).length,
+      },
+    });
+  } catch (err) {
+    console.error("[api/discover] audit", err);
+  }
   return Response.json({ record_type: screen.record_type, fields, actions, software: software.map((s) => s.name) });
 }

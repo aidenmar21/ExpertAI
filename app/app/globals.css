@@ -25,3 +25,16 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Document Picture-in-Picture (PopOut): the floating window gets the same tokens and a full-height body. */
+.pip-body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+.pip-root {
+  height: 100%;
+}

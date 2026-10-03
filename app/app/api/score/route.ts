@@ -1,5 +1,5 @@
 import type { QuestionPick, ScreenEvent, WorkMap } from "@understudy/shared";
-import { scoreSession } from "@understudy/brain/server";
+import { appendAudit, scoreSession, sessionFromHeaders } from "@understudy/brain/server";
 import { listJobIds } from "@/lib/job";
 
 interface ScoreRequest {
@@ -35,6 +35,11 @@ export async function POST(request: Request) {
       events: body.events ?? [],
       questions: body.questions ?? [],
     });
+    try {
+      appendAudit(sessionFromHeaders(request.headers), { actor: "system", type: "scoreboard", payload: { job_id: body.job_id, ...result.scoreboard } });
+    } catch (err) {
+      console.error("[api/score] audit", err);
+    }
     return Response.json(result);
   } catch (err) {
     console.error("[api/score]", err);

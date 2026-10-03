@@ -97,7 +97,7 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
     }
 
     case "stuck":
-      return `[STUCK] ${oneLine(m.hint)}`;
+      return `[STUCK] ${oneLine(m.hint)} Say this in your own words, in at most two sentences, then stop and wait.`;
 
     case "off_record":
       return m.on ? "[OFF RECORD]" : "[ON RECORD]";

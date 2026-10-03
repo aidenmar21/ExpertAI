@@ -25,9 +25,55 @@ export function gate(signals: GateSignals): GateResult {
   return { open: true, reason: "quiet for 1500ms" };
 }
 
-/** Step 1 stub. Stuck detection lands with the tutor. */
-export function detectStuck(_signals: StuckSignals): StuckResult {
-  return { stuck: false, hint: "" };
+// ---------- Stuck detection (pure) ----------
+const STUCK_IDLE_MS = 20_000;       // idle with a record open
+const STUCK_FLIPS = 2;              // same field flipped back and forth in 30s
+const STUCK_HOVER_MS = 4_000;       // hovering an action button
+const STUCK_HESITATIONS = 2;        // "um", "wait", "I don't know" in the last 20s
+const SECONDARY_WEIGHT = 0.2;       // weaker signals add a little on top of the strongest one
+
+const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
+const humanize = (key: string) => {
+  const s = key.replace(/[_-]+/g, " ").trim();
+  return s ? s[0].toUpperCase() + s.slice(1) : key;
+};
+
+/** Each signal as a fraction of its threshold, 0..1, with the hint it would produce. */
+function stuckParts(s: StuckSignals): { score: number; hint: string }[] {
+  const idleS = Math.round(s.msIdleWithRecordOpen / 1000);
+  const hover = s.msHoveringAction;
+  return [
+    { score: clamp01(s.msIdleWithRecordOpen / STUCK_IDLE_MS), hint: `You've been on this one for ${idleS} seconds` },
+    {
+      score: clamp01(s.backAndForthCount / STUCK_FLIPS),
+      hint: `You've changed the same field back and forth${s.backAndForthCount > 1 ? ` ${s.backAndForthCount} times` : ""}`,
+    },
+    { score: hover ? clamp01(hover.ms / STUCK_HOVER_MS) : 0, hint: hover ? `Hovering over ${humanize(hover.action)}` : "" },
+    { score: clamp01(s.hesitationWords / STUCK_HESITATIONS), hint: "You sound unsure" },
+  ];
+}
+
+/**
+ * 0..1: how stuck the new hire looks. The strongest signal counts fully; the others add a little,
+ * so two half-signals (10s idle plus one flip) read higher than either alone. 1 means stuck.
+ */
+export function stuckScore(s: StuckSignals): number {
+  const scores = stuckParts(s).map((p) => p.score);
+  const max = Math.max(...scores);
+  const rest = scores.reduce((a, b) => a + b, 0) - max;
+  return clamp01(max + SECONDARY_WEIGHT * rest);
+}
+
+/**
+ * Stuck when any signal crosses its threshold (idle >= 20s with a record open, the same field flipped
+ * twice, hovering an action >= 4s, two hesitation words) or the combined score reaches 1.
+ * The hint names the strongest signal, e.g. "Hovering over Refund".
+ */
+export function detectStuck(s: StuckSignals): StuckResult {
+  const parts = stuckParts(s);
+  const strongest = parts.reduce((best, p) => (p.score > best.score ? p : best), parts[0]);
+  const stuck = strongest.score >= 1 || stuckScore(s) >= 1;
+  return { stuck, hint: stuck ? strongest.hint : "" };
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { QuestionPick, ScreenEvent, ScreenState, TranscriptLine, WorkMap } from "@understudy/shared";
 import { pickQuestion } from "@understudy/engine/server";
-import { baselineRulesFor, roleById } from "@understudy/brain/server";
+import { appendAudit, baselineRulesFor, roleById, sessionFromHeaders } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/job";
 
 interface QuestionRequest {
@@ -31,6 +31,17 @@ export async function POST(request: Request) {
       askedGuardrail: body.asked_guardrail ?? false,
       roleName: roleById(job.job.role_id)?.name,
     });
+    if (result) {
+      try {
+        appendAudit(sessionFromHeaders(request.headers), {
+          actor: "expertai",
+          type: "question_asked",
+          payload: { question: result.question, kind: result.kind ?? (result.is_guardrail ? "guardrail" : "unexplained"), reason: result.reason ?? null, rule_id: result.rule_id ?? null, about_event_id: result.about_event_id },
+        });
+      } catch (err) {
+        console.error("[api/question] audit", err);
+      }
+    }
     return Response.json(result);
   } catch (err) {
     console.error("[api/question]", err);

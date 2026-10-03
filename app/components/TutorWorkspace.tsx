@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CheckResult, JobProfile, ScreenEvent, WorkMap } from "@understudy/shared";
+import type { CheckResult, JobProfile, ScreenEvent, StuckSignals, Value, WorkMap } from "@understudy/shared";
 import { checkAction } from "@understudy/brain";
-import { detectStuck, startCapture } from "@understudy/engine";
+import { detectStuck, startCapture, stuckScore } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
 import FakeApp from "@/components/FakeApp";
 import { EventRow } from "@/components/ApprenticePanel";
@@ -15,6 +15,14 @@ import { sessionStats } from "@/lib/stats";
 import { flag } from "@/lib/flags";
 
 const STUCK_TICK_MS = 1000;
+const GUIDE_EVERY_MS = 45_000; // at most one stuck hint per 45s
+
+/** POST /api/guide: the usual next step for the record on screen, from the pre-loaded role knowledge. */
+interface Guide { hint: string; step: string; judgment?: string; guardrail?: string; speak: string }
+/** What a later agent trains on: expertai:stuck-feedback:<job> in localStorage, append-only. */
+interface StuckFeedbackSignals { idle_ms: number; back_and_forth: number; hover_ms: number; hesitation: number; since_help_ms: number; fields_touched: number }
+interface StuckFeedback { t: number; signals: StuckFeedbackSignals; label: boolean }
+interface ShownGuide { hint: string; step: string; judgment?: string; guardrail?: string; signals: StuckFeedbackSignals; t: number; vote: boolean | null }
 
 /** New-hire mode: the fake app plus the tutor. Every action is checked against the confirmed Work Map first. */
 export default function TutorWorkspace({ profile }: { profile: ClientJob }) {
@@ -111,10 +119,15 @@ function TutorPanel({
   const events = useSyncExternalStore(screenEvents.subscribe, screenEvents.all, noEvents);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastHint, setLastHint] = useState<string | null>(null);
+  const [guide, setGuide] = useState<ShownGuide | null>(null);
+  const [score, setScore] = useState(0);
   const capture = useRef<{ stop(): void } | null>(null);
   const agentRef = useRef(agent);
   const lastInput = useRef(0);
+  const record = useRef<Record<string, Value>>({}); // latest screen_state.record from vision
+  const lastGuideAt = useRef(-GUIDE_EVERY_MS);
+  const lastHelpAt = useRef<number | null>(null);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     agentRef.current = agent;
@@ -128,7 +141,8 @@ function TutorPanel({
     return () => types.forEach((t) => window.removeEventListener(t, mark));
   }, []);
 
-  // Stuck detection: engine decides from the signals, the tutor offers help (voice throttles repeats).
+  // Stuck detection: engine decides from the signals; /api/guide turns the record on screen into the usual next
+  // step from the role knowledge; the tutor says it. At most one hint per 45s, never while a guardrail is active.
   useEffect(() => {
     if (!running || !flag("stuck")) return;
     const id = setInterval(() => {
@@ -136,25 +150,58 @@ function TutorPanel({
       if (a.status !== "connected" || a.activeGuardrail) return;
       const now = sessionT();
       const openedAt = activity.recordOpenedAt();
-      const result = detectStuck({
+      const signals: StuckSignals = {
         msIdleWithRecordOpen: openedAt === null ? 0 : now - Math.max(openedAt, lastInput.current),
         backAndForthCount: activity.backAndForthCount(now),
         msHoveringAction: activity.hovering(now),
         hesitationWords: a.getHesitationWords(),
-      });
-      if (result.stuck && result.hint) {
-        const outcome = a.sendContext({ kind: "stuck", hint: result.hint });
-        if (outcome === "sent" || outcome === "queued") setLastHint(result.hint);
-      }
+      };
+      const next = stuckScore(signals);
+      setScore((prev) => (Math.abs(prev - next) < 0.05 ? prev : next));
+      const result = detectStuck(signals);
+      if (!result.stuck || !result.hint) return;
+      if (inFlight.current || now - lastGuideAt.current < GUIDE_EVERY_MS) return;
+      inFlight.current = true;
+      lastGuideAt.current = now;
+      const fieldsTouched = screenEvents.all().filter((e) => e.type === "field_changed" && (openedAt === null || e.t >= openedAt)).length;
+      const summary: StuckFeedbackSignals = {
+        idle_ms: signals.msIdleWithRecordOpen,
+        back_and_forth: signals.backAndForthCount,
+        hover_ms: signals.msHoveringAction?.ms ?? 0,
+        hesitation: signals.hesitationWords,
+        since_help_ms: lastHelpAt.current === null ? now : now - lastHelpAt.current,
+        fields_touched: fieldsTouched,
+      };
+      fetchGuide(jobId, record.current, signals.msHoveringAction?.action, signals)
+        .then((g) => {
+          const b = agentRef.current;
+          if (b.status !== "connected" || b.activeGuardrail) return;
+          const speak = g?.speak || result.hint;
+          const outcome = b.sendContext({ kind: "stuck", hint: speak });
+          if (outcome === "sent" || outcome === "queued") {
+            lastHelpAt.current = sessionT();
+            setGuide({ hint: g?.hint || result.hint, step: g?.step ?? "", judgment: g?.judgment, guardrail: g?.guardrail, signals: summary, t: sessionT(), vote: null });
+          }
+        })
+        .finally(() => {
+          inFlight.current = false;
+        });
     }, STUCK_TICK_MS);
     return () => clearInterval(id);
-  }, [running]);
+  }, [running, jobId]);
+
+  function vote(label: boolean) {
+    if (!guide) return;
+    appendStuckFeedback(jobId, { t: guide.t, signals: guide.signals, label });
+    setGuide({ ...guide, vote: label });
+  }
 
   async function start() {
     setError(null);
     try {
       capture.current = await startCapture({
         onResult: (r) => {
+          if (r.screen_state?.record) record.current = r.screen_state.record;
           for (const raw of r.events) {
             const event = { ...raw, t: sessionT() };
             screenEvents.push(event);
@@ -215,6 +262,20 @@ function TutorPanel({
               ? `No company rules confirmed yet; ${standardRules} industry-standard rules speak up when nothing else covers a case`
               : `${confirmedRules} company rule${confirmedRules > 1 ? "s" : ""} enforced, ${standardRules} industry-standard fallbacks`}
         </p>
+        {running && (
+          <div className="mt-2 flex items-center gap-3">
+            <p className="text-xs font-medium text-sky-700 dark:text-sky-300">Ask ExpertAI anything about this job out loud.</p>
+            {flag("stuck") && (
+              <div
+                className="ml-auto h-1 w-16 shrink-0 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
+                title={`Stuck score ${Math.round(score * 100)}%`}
+                aria-label={`Stuck score ${Math.round(score * 100)} percent`}
+              >
+                <div className="h-full rounded-full bg-amber-400 transition-all duration-500" style={{ width: `${Math.round(score * 100)}%` }} />
+              </div>
+            )}
+          </div>
+        )}
         {!hasMap && (
           <Link href={`/?job=${jobId}`} className="mt-2 inline-block text-xs font-medium text-sky-700 hover:underline dark:text-sky-300">
             Go to expert mode →
@@ -228,11 +289,31 @@ function TutorPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {lastHint && (
-          <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
-            <span className="mr-1 text-xs font-medium uppercase">Looks stuck</span>
-            {lastHint}
-          </p>
+        {guide && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">Looks stuck</p>
+              <div className="flex items-center gap-1" aria-label="Was this hint right?">
+                <FeedbackButton label="Helpful" active={guide.vote === true} onClick={() => vote(true)} up />
+                <FeedbackButton label="Not helpful" active={guide.vote === false} onClick={() => vote(false)} />
+              </div>
+            </div>
+            <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">{guide.hint}</p>
+            {guide.step && (
+              <p className="mt-2 text-sm text-slate-800 dark:text-slate-200">
+                <span className="font-medium">Usual next step: </span>
+                {guide.step}
+              </p>
+            )}
+            {guide.judgment && <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-400">{guide.judgment}</p>}
+            {guide.guardrail && (
+              <p className="mt-1.5 text-xs text-amber-800 dark:text-amber-300">
+                <span className="font-medium">Keep in mind: </span>
+                {guide.guardrail}
+              </p>
+            )}
+            {guide.vote !== null && <p className="mt-2 text-xs text-slate-500">Thanks, noted.</p>}
+          </div>
         )}
 
         {agent.newCases.length > 0 && (
@@ -356,6 +437,60 @@ function GuardrailNotice({
       </div>
     </div>
   );
+}
+
+function FeedbackButton({ label, active, onClick, up }: { label: string; active: boolean; onClick: () => void; up?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={`rounded-lg p-1.5 transition ${
+        active
+          ? "bg-amber-200 text-amber-900 dark:bg-amber-500/30 dark:text-amber-100"
+          : "text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-500/20"
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className={`h-4 w-4 ${up ? "" : "rotate-180"}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Z" />
+        <path d="M7 11l4-7a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 20H7" />
+      </svg>
+    </button>
+  );
+}
+
+async function fetchGuide(jobId: string, record: Record<string, Value>, action: string | undefined, signals: StuckSignals): Promise<Guide | null> {
+  try {
+    const r = await fetch("/api/guide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ job_id: jobId, record, action, signals }),
+    });
+    return r.ok ? ((await r.json()) as Guide) : null;
+  } catch {
+    return null;
+  }
+}
+
+function appendStuckFeedback(jobId: string, entry: StuckFeedback) {
+  const key = `expertai:stuck-feedback:${jobId}`;
+  try {
+    const prev = JSON.parse(localStorage.getItem(key) ?? "[]") as unknown;
+    localStorage.setItem(key, JSON.stringify([...(Array.isArray(prev) ? prev : []), entry]));
+  } catch {
+    // storage unavailable: feedback is best-effort
+  }
 }
 
 function useTutorBriefing(jobId: string): string | null {
