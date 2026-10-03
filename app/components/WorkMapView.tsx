@@ -8,7 +8,8 @@ import { differsFromStandard, useWorkMap, workMaps } from "@/lib/workmap";
 import KnowledgeBox from "@/components/KnowledgeBox";
 import { sessionStats } from "@/lib/stats";
 import Scoreboard from "@/components/Scoreboard";
-import { btn, card, emptyBox, eyebrow, link, page, pill } from "@/components/ui/styles";
+import { btn, card, emptyBox, eyebrow, page, pill } from "@/components/ui/styles";
+import Provenance, { MomentThumb } from "@/components/Provenance";
 
 /** Rule-type chips: semantic pairs only (danger / warning / info / neutral / success). */
 const TYPE_STYLE: Record<RuleType, string> = {
@@ -110,7 +111,7 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
               ) : (
                 <ul className="mt-5 space-y-3">
                   {company.map((r) => (
-                    <RuleCard key={r.id} rule={r} matchesStandard={matchesStandard.has(r.id)} />
+                    <RuleCard key={r.id} rule={r} map={map} matchesStandard={matchesStandard.has(r.id)} />
                   ))}
                 </ul>
               )}
@@ -153,10 +154,10 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
 
 /**
  * Collapsed by default: type chip, rule text, confirmed state. Click expands to the quote, when/then,
- * the screen moment and a thumbnail placeholder. Company rules sit on an accent-tinted hairline with the
+ * the screen moment thumbnail and a "Why do we believe this?" link. Company rules sit on an accent-tinted hairline with the
  * quote in the link colour; baseline rules are muted on a dashed hairline; overridden standard text is struck.
  */
-function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overriddenBy?: Rule; matchesStandard?: boolean }) {
+function RuleCard({ rule, map, overriddenBy, matchesStandard }: { rule: Rule; map?: WorkMap; overriddenBy?: Rule; matchesStandard?: boolean }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
   const bodyId = useId();
@@ -244,7 +245,7 @@ function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overrid
                 )}
               </dl>
               <div className="mt-4 flex items-center gap-3">
-                <Thumb t={rule.screen_moment.t} />
+                <MomentThumb moment={rule.screen_moment} />
                 <div className="text-meta text-ink-secondary">
                   <p className="font-medium text-ink">Screen moment</p>
                   <p className="tabular-nums">
@@ -253,6 +254,11 @@ function RuleCard({ rule, overriddenBy, matchesStandard }: { rule: Rule; overrid
                   </p>
                 </div>
               </div>
+              {map && !baseline && (
+                <div className="mt-4">
+                  <Provenance rule={rule} map={map} />
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -278,18 +284,6 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-/** 96x60 placeholder until real frame thumbnails land; labelled with the time so it is not an empty box. */
-function Thumb({ t }: { t: number }) {
-  return (
-    <div
-      aria-hidden
-      className="flex h-[60px] w-24 shrink-0 items-end justify-end rounded-sm border border-line bg-surface-subtle p-1.5"
-    >
-      <span className="rounded-xs bg-surface px-1 text-note tabular-nums text-ink-tertiary">{formatT(t)}</span>
-    </div>
-  );
-}
-
 function Stat({ label, value, tone = "ok" }: { label: string; value: number; tone?: "ok" | "warn" }) {
   return (
     <div className={`${card} min-w-0 px-5 py-4`}>
@@ -304,7 +298,7 @@ function StepItem({ s }: { s: WorkMap["steps"][number] }) {
     <li className="relative">
       <span aria-hidden className="absolute -left-[33px] top-1.5 size-3 rounded-full border-2 border-canvas bg-action" />
       <div className="flex gap-4">
-        <Thumb t={s.screen_moment.t} />
+        <MomentThumb moment={s.screen_moment} label={s.title} />
         <div className="min-w-0">
           <p className="text-meta tabular-nums text-ink-tertiary">
             {formatT(s.screen_moment.t)}

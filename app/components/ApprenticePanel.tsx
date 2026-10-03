@@ -14,6 +14,7 @@ import { rebuildWorkMap, useWorkMap } from "@/lib/workmap";
 import DiscoveryReview, { type Discovered } from "@/components/DiscoveryReview";
 import { banner, btn, card, emptyBox, eyebrow, field, link, pill } from "@/components/ui/styles";
 import { auditHeaders, logAudit } from "@/lib/audit";
+import { putFrame } from "@/lib/frames";
 
 /** Live feed of what the apprentice saw on screen, plus the voice agent. */
 interface PanelProps { jobId: string; escalateTo: string; expert?: string; screenFields?: number; }
@@ -38,6 +39,9 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
   const [watching, setWatching] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const capture = useRef<CaptureHandle | null>(null);
+  const latestFrame = useRef<string | null>(null); // last frame sent to vision; becomes the thumbnail for its events
+  const discoverNext = useRef(false); // "Watch another app": run discovery on the new share's first frame
+  const [otherApp, setOtherApp] = useState(false);
   const agentRef = useRef<ApprenticeAgent | null>(null);
 
   const history = () => ({ jobId, expert, events: screenEvents.all(), transcript: agentRef.current?.transcript ?? [] });
@@ -71,8 +75,10 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
   useEffect(() => {
     if (offRecordRef.current !== offRecord) logAudit(offRecord ? "off_record_start" : "off_record_end", { t: sessionT() }, "expert");
     offRecordRef.current = offRecord;
-    if (offRecord) capture.current?.pause(); // off the record: no frames leave the browser
-    else capture.current?.resume();
+    if (offRecord) {
+      capture.current?.pause(); // off the record: no frames leave the browser
+      latestFrame.current = null; // and none are kept as thumbnails
+    } else capture.current?.resume();
     const t = sessionT();
     sessionStats.update(jobId, (st) => {
       const open = st.offRecord.find((w) => w.end === null);
@@ -121,32 +127,70 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
     }
   }
 
+  /** Frame and result handlers shared by the first share and "Watch another app". */
+  function captureHandlers(): Parameters<typeof startCapture>[0] {
+    return {
+      onFrame: (frame) => {
+        if (offRecordRef.current) {
+          latestFrame.current = null;
+          return;
+        }
+        latestFrame.current = frame;
+        if (discoverNext.current || (screenFields === 0 && !discoveredOnce.current)) {
+          discoverNext.current = false;
+          discoveredOnce.current = true;
+          void discover(frame);
+        }
+      },
+      onResult: (r) => {
+        if (offRecordRef.current) return; // off the record: nothing is kept or forwarded
+        screenRef.current = r.screen_state;
+        // The frame these events came from becomes their screen moment's thumbnail (kept only in this browser).
+        let frameId: string | undefined;
+        const frame = latestFrame.current;
+        if (r.events.length > 0 && frame) {
+          const t = sessionT();
+          frameId = `f_${t}`;
+          void putFrame(jobId, frameId, frame, t);
+        }
+        for (const raw of r.events) {
+          // One clock for events and transcript: stamp with the session time it arrived.
+          const event = { ...raw, t: sessionT(), ...(frameId ? { frameId } : {}) };
+          screenEvents.push(event);
+          agentRef.current?.sendContext({ kind: "screen_event", event });
+        }
+      },
+    };
+  }
+
   async function start() {
     setError(null);
     if (screenEvents.all().length === 0) resetSession();
     try {
-      capture.current = await startCapture({
-        onFrame: (frame) => {
-          if (screenFields === 0 && !discoveredOnce.current) {
-            discoveredOnce.current = true;
-            void discover(frame);
-          }
-        },
-        onResult: (r) => {
-          if (offRecordRef.current) return; // off the record: nothing is kept or forwarded
-          screenRef.current = r.screen_state;
-          for (const raw of r.events) {
-            // One clock for events and transcript: stamp with the session time it arrived.
-            const event = { ...raw, t: sessionT() };
-            screenEvents.push(event);
-            agentRef.current?.sendContext({ kind: "screen_event", event });
-          }
-        },
-      });
+      capture.current = await startCapture(captureHandlers());
       setWatching(true);
       await agent.start();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Any-app demo: share a different window or tab, learn its layout from the first frame, keep the session going. */
+  async function watchAnother() {
+    setError(null);
+    try {
+      const next = await startCapture(captureHandlers()); // the browser's picker: any window, tab or screen
+      capture.current?.stop();
+      capture.current = next;
+      if (offRecordRef.current) next.pause();
+      latestFrame.current = null;
+      discoverNext.current = true;
+      setFound(null);
+      setOtherApp(true);
+      setWatching(true);
+    } catch (e) {
+      // Picker dismissed: the current share keeps running.
+      if (!isPermissionDenied(e instanceof Error ? e.message : String(e))) setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -290,6 +334,9 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
 
       {/* ---- scrollable body ---- */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {found && otherApp && (
+          <p className={`${pill.info} mb-3`} role="status">Watching: another app</p>
+        )}
         {found && (
           <DiscoveryReview
             jobId={jobId}
@@ -320,14 +367,24 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
         <div className="flex items-center justify-between gap-3 pb-3">
           <p className={eyebrow}>Screen events</p>
           {watching && !found && (
-            <button
-              type="button"
-              onClick={() => discover(capture.current?.grab())}
-              title="Learn this app's fields and buttons from the current frame"
-              className={`${link} text-meta font-medium`}
-            >
-              Learn this app
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={watchAnother}
+                title="Share a different window or tab; ExpertAI learns its layout from the first frame"
+                className="text-meta text-ink-secondary underline-offset-[0.15em] hover:text-link hover:underline"
+              >
+                Watch another app
+              </button>
+              <button
+                type="button"
+                onClick={() => discover(capture.current?.grab())}
+                title="Learn this app's fields and buttons from the current frame"
+                className={`${link} text-meta font-medium`}
+              >
+                Learn this app
+              </button>
+            </div>
           )}
         </div>
         {events.length === 0 ? (

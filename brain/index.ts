@@ -128,7 +128,9 @@ export function reconcileBaseline(carried: Rule[], learned: Rule[]): Rule[] {
     const a = fieldsOf(x), b = fieldsOf(y);
     return a.size > 0 && a.size === b.size && [...a].every((f) => b.has(f));
   };
-  const sameOutcome = (x: Rule, y: Rule) => JSON.stringify(normThen(x.then)) === JSON.stringify(normThen(y.then));
+  // Same intent unless the two rules actually conflict: a required value that differs, a value one requires and the
+  // other forbids, or different people to escalate to. Wording and extra detail ("at the lowest price") don't count.
+  const sameOutcome = (x: Rule, y: Rule) => !conflicts(x.then, y.then) && overlaps(x.then, y.then);
   return carried.map((b) => {
     if (b.source !== "baseline") return b;
     const match = learned.find((l) => sameFields(b, l));
@@ -167,11 +169,23 @@ export function overrideByDecisions(
     return b;
   });
 }
-function normThen(t: Rule["then"]) {
-  return {
-    must: t.must ?? {}, must_not: t.must_not ?? {},
-    must_not_action: [...(t.must_not_action ?? [])].sort(), escalate_to: t.escalate_to ?? "",
-  };
+function conflicts(a: Rule["then"], b: Rule["then"]): boolean {
+  const eq = (x: unknown, y: unknown) => String(x ?? "").trim().toLowerCase() === String(y ?? "").trim().toLowerCase();
+  for (const [k, v] of Object.entries(a.must ?? {})) {
+    if (b.must && k in b.must && !eq(b.must[k], v)) return true;
+    if (b.must_not && k in b.must_not && eq(b.must_not[k], v)) return true;
+  }
+  for (const [k, v] of Object.entries(b.must ?? {})) if (a.must_not && k in a.must_not && eq(a.must_not[k], v)) return true;
+  if (a.escalate_to && b.escalate_to && !eq(a.escalate_to, b.escalate_to)) return true;
+  return false;
+}
+/** They say something in common: a shared required value, a shared blocked action, or the same escalation. */
+function overlaps(a: Rule["then"], b: Rule["then"]): boolean {
+  const eq = (x: unknown, y: unknown) => String(x ?? "").trim().toLowerCase() === String(y ?? "").trim().toLowerCase();
+  if (Object.entries(a.must ?? {}).some(([k, v]) => b.must && k in b.must && eq(b.must[k], v))) return true;
+  if (Object.entries(a.must_not ?? {}).some(([k, v]) => b.must_not && k in b.must_not && eq(b.must_not[k], v))) return true;
+  if ((a.must_not_action ?? []).some((x) => (b.must_not_action ?? []).includes(x))) return true;
+  return !!a.escalate_to && eq(a.escalate_to, b.escalate_to);
 }
 
 // ---------- Redaction ----------

@@ -18,6 +18,7 @@ import { auditHeaders, logAudit } from "@/lib/audit";
 import { useStuckDetector } from "@/lib/useStuckDetector";
 import { STUCK_DETECTOR_COPY, describeMeta, stuckAuditPayload } from "@/lib/stuckModel";
 import { banner, btn, card, emptyBox, eyebrow, link, pill } from "@/components/ui/styles";
+import { MomentThumb } from "@/components/Provenance";
 
 const STUCK_TICK_MS = 1000;
 const GUIDE_EVERY_MS = 45_000; // at most one stuck hint per 45s
@@ -512,11 +513,16 @@ function GuardrailNotice({
 
       {replay && moment && (
         <div className="mt-3 rounded-md bg-surface p-3 text-body text-ink">
-          <p className={eyebrow}>
-            {expert}&rsquo;s moment · {formatT(moment.t)}
-            {moment.record ? ` · ${moment.record}` : ""}
-          </p>
-          <p className="mt-1">{step ? `${step.title}: ${step.decision}` : check.rule?.text}</p>
+          <div className="flex items-start gap-3">
+            <MomentThumb moment={moment.frameId ? moment : { ...moment, frameId: step?.screen_moment.frameId }} label={`${expert}'s moment`} />
+            <div className="min-w-0">
+              <p className={eyebrow}>
+                {expert}&rsquo;s moment · {formatT(moment.t)}
+                {moment.record ? ` · ${moment.record}` : ""}
+              </p>
+              <p className="mt-1">{step ? `${step.title}: ${step.decision}` : check.rule?.text}</p>
+            </div>
+          </div>
         </div>
       )}
 
