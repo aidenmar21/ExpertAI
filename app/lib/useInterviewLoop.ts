@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { QuestionPick, WorkMap } from "@understudy/shared";
+import { useEffect, useRef, useState } from "react";
+import type { QuestionPick, ScreenState, WorkMap } from "@understudy/shared";
 import { gate } from "@understudy/engine";
 import type { ApprenticeAgent } from "@understudy/voice";
 import { screenEvents } from "@/lib/session";
-import { rebuildWorkMap, workMaps } from "@/lib/workmap";
+import { rebuildWorkMap, useWorkMap } from "@/lib/workmap";
 import { sessionStats } from "@/lib/stats";
 
 const TICK_MS = 250;
@@ -26,11 +26,14 @@ export function useInterviewLoop(opts: {
   jobId: string;
   expert: string;
   now: () => number;
+  /** Latest screen state from capture, so the picker can evaluate baseline rules against what is on screen. */
+  screen?: () => ScreenState | null;
 }) {
   const { agent, active, jobId, expert, now } = opts;
+  const screenRef = useRef(opts.screen);
   const [gateOpen, setGateOpen] = useState(false);
   const [asked, setAsked] = useState<AskedQuestion[]>([]);
-  const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
+  const map = useWorkMap(jobId, expert);
 
   const agentRef = useRef(agent);
   const mapRef = useRef<WorkMap | null>(null);
@@ -43,6 +46,7 @@ export function useInterviewLoop(opts: {
   useEffect(() => {
     agentRef.current = agent;
     mapRef.current = map;
+    screenRef.current = opts.screen;
   });
 
   // Keyboard / mouse activity anywhere on the page.
@@ -108,6 +112,8 @@ export function useInterviewLoop(opts: {
             recent: screenEvents.all().slice(-RECENT_EVENTS),
             transcript: a.transcript,
             map: mapRef.current ?? { job_id: jobId, expert, steps: [], rules: [], open_gaps: [] },
+            screen: screenRef.current?.() ?? null,
+            asked_guardrail: sessionStats.get(jobId).questions.some((q) => q.is_guardrail),
           }),
         });
         const pick = res.ok ? ((await res.json()) as QuestionPick | null) : null;
@@ -131,4 +137,3 @@ export function useInterviewLoop(opts: {
   return { gateOpen, asked };
 }
 
-const noMap = (): WorkMap | null => null;

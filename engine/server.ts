@@ -1,9 +1,10 @@
 // Server-only engine entry. Import this from app API routes, never from the browser.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { pickFromRecords } from "@understudy/brain";
+import { captureDecisions, checkAction, pickFromRecords } from "@understudy/brain";
 import type {
   Condition,
+  JobProfile,
   QuestionPick,
   Rule,
   ScreenEvent,
@@ -30,18 +31,137 @@ const EVENT_TYPES: ReadonlySet<string> = new Set([
  * One question, or null to stay silent. Brain chooses the wording. A change a
  * known rule already explains is not asked about again.
  */
+export interface PickOptions {
+  baseline?: Rule[];              // industry-standard rules for this role (knowledge/baseline-rules.json)
+  screen?: ScreenState | null;    // latest screen state, for evaluating rule conditions
+  job?: JobProfile | null;        // action -> sets, escalate_to, record_type
+  askedGuardrail?: boolean;       // has a guardrail question been asked this session
+  roleName?: string;
+}
+
+/**
+ * The one question worth asking, or null to stay silent. Ranking:
+ * 1. the expert CONTRADICTED a baseline rule (asked as a comparison with the standard),
+ * 2. a decision no rule explains (why), then follow-ups,
+ * 3. the expert CONFIRMED a baseline rule (one light check that it always holds here),
+ * 4. if no guardrail question has been asked yet and the expert has explained at least one decision,
+ *    one guardrail question (limit, exception, or stop-and-ask) so every session has one.
+ */
 export async function pickQuestion(
   recent: ScreenEvent[],
   map: WorkMap,
   policy: string,
   transcript: TranscriptLine[] = [],
+  opts: PickOptions = {},
 ): Promise<QuestionPick | null> {
+  const baseline = opts.baseline ?? (map.rules ?? []).filter((r) => r.source === "baseline");
+  const companyRules = (map.rules ?? []).filter((r) => r.source !== "baseline" || r.confirmed);
+  const records = captureDecisions({ events: recent, transcript });
+  const unexplained = new Set(records.filter((r) => r.why === null && !r.asked.includes("why")).flatMap((r) => r.sources.event_ids));
+  const askedTexts = new Set(transcript.filter((l) => l.speaker === "agent").map((l) => l.text.trim().toLowerCase()));
+  const who = opts.roleName ? `most ${opts.roleName.toLowerCase().split(",")[0]}s` : "most people in this job";
+
+  // 1. Contradictions, newest first.
+  for (const event of [...recent].reverse()) {
+    if (!event.field || !unexplained.has(event.id)) continue;
+    const hit = contradictedRule(event, baseline, opts);
+    if (!hit) continue;
+    if (ruleExplains(companyRules, event, policy)) continue; // the company already told us this differs
+    const q = `For ${who}, ${lower(hit.text)} You set ${label(event.field)} to ${String(event.to)}. Why is it different here?`;
+    if (askedTexts.has(q.toLowerCase())) continue;
+    return {
+      question: q, about_event_id: event.id, is_guardrail: isGuardrailType(hit),
+      kind: "contradiction", reason: `contradicts baseline ${hit.id}`, rule_id: hit.id,
+    };
+  }
+
+  // 2. Unexplained decisions and follow-ups (brain's picker: why, then what would change, then when to stop).
   const pick = pickFromRecords(recent, transcript);
-  if (!pick || !pick.question.startsWith("Why")) return pick;
-  const event = recent.find((item) => item.id === pick.about_event_id);
-  if (event && ruleExplains(map.rules ?? [], event, policy)) return null;
-  return pick;
+  if (pick) {
+    const event = recent.find((item) => item.id === pick.about_event_id);
+    const explained = pick.question.startsWith("Why") && event && ruleExplains(companyRules, event, policy);
+    if (!explained) {
+      return { ...pick, kind: pick.question.startsWith("Why") ? "unexplained" : "follow_up", reason: "no rule explains this decision" };
+    }
+  }
+
+  // 3. One confirmation per baseline rule the expert followed.
+  for (const event of [...recent].reverse()) {
+    if (!event.field) continue;
+    const rule = confirmedRule(event, baseline, opts);
+    if (!rule) continue;
+    const q = `That matches the standard: ${lower(rule.text)} Is it always that way here, or are there exceptions?`;
+    if (askedTexts.has(q.toLowerCase())) continue;
+    return { question: q, about_event_id: event.id, is_guardrail: false, kind: "confirmation", reason: `confirms baseline ${rule.id}`, rule_id: rule.id };
+  }
+
+  // 4. Guarantee one guardrail question per session.
+  const explainedCount = records.filter((r) => r.why !== null).length;
+  if (!opts.askedGuardrail && explainedCount >= 1 && recent.length) {
+    const escalate = opts.job?.job.escalate_to ?? "a manager";
+    const candidates = baseline.filter((r) => r.type === "limit" || r.type === "stop_and_ask" || r.type === "exception");
+    const rule = candidates.find((r) => !map.rules?.some((x) => x.source !== "baseline" && sameFields(x, r)));
+    const q = rule
+      ? `Is there a point where you stop and get the ${escalate}? For ${who}, ${lower(rule.text)}`
+      : `Is there a point on a case like this where you'd stop and get the ${escalate} instead of deciding yourself?`;
+    if (!askedTexts.has(q.toLowerCase())) {
+      const about = recent[recent.length - 1].id;
+      return { question: q, about_event_id: about, is_guardrail: true, kind: "guardrail", reason: "no guardrail question yet this session", rule_id: rule?.id };
+    }
+  }
+  return null;
 }
+
+/** A baseline rule whose conditions hold on screen and whose outcome the expert's change breaks. */
+function contradictedRule(event: ScreenEvent, baseline: Rule[], opts: PickOptions): Rule | null {
+  const record: Record<string, Value> = { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null };
+  const action = actionFor(event, opts.job);
+  const probe = { action: action ?? "__field__", record };
+  const res = checkAction(probe, { job_id: "", expert: "", steps: [], rules: baseline, open_gaps: [] }, {
+    includeUnconfirmed: true, baselineFallback: false, job: opts.job ?? undefined,
+  });
+  if (!res.ok && res.rule) return res.rule;
+  // Field-level contradiction: a rule that applies says this field must be something else.
+  return baseline.find((r) =>
+    r.when.every((c) => evalCond(c, record)) && r.then.must?.[event.field!] !== undefined && !valuesMatch(r.then.must[event.field!], event.to),
+  ) ?? null;
+}
+
+/** A baseline rule the expert's change satisfies (same field, same required value). */
+function confirmedRule(event: ScreenEvent, baseline: Rule[], opts: PickOptions): Rule | null {
+  const record: Record<string, Value> = { ...(opts.screen?.record ?? {}), [event.field!]: event.to ?? null };
+  return baseline.find((r) =>
+    r.when.length > 0 && r.when.every((c) => evalCond(c, record)) && r.then.must?.[event.field!] !== undefined &&
+    valuesMatch(r.then.must[event.field!], event.to),
+  ) ?? null;
+}
+
+function actionFor(event: ScreenEvent, job?: JobProfile | null): string | null {
+  if (!job || event.type !== "status_changed") return null;
+  return job.screen.actions.find((a) => valuesMatch(a.sets.status as Value, event.to))?.key ?? null;
+}
+
+function evalCond(c: Condition, rec: Record<string, Value>): boolean {
+  const v = rec[c.field];
+  switch (c.op) {
+    case "missing": return v == null || v === "";
+    case "present": return !(v == null || v === "");
+    case "eq": return valuesMatch(c.value as Value, v);
+    case "neq": return !valuesMatch(c.value as Value, v);
+    case "in": return Array.isArray(c.value) && c.value.some((x) => valuesMatch(x, v));
+    case "gt": return v != null && Number(v) > Number(c.value);
+    case "gte": return v != null && Number(v) >= Number(c.value);
+    case "lt": return v != null && Number(v) < Number(c.value);
+    case "lte": return v != null && Number(v) <= Number(c.value);
+  }
+}
+const sameFields = (a: Rule, b: Rule) => {
+  const x = new Set(a.when.map((c) => c.field)), y = new Set(b.when.map((c) => c.field));
+  return x.size === y.size && [...x].every((f) => y.has(f));
+};
+const isGuardrailType = (r: Rule) => r.type === "guardrail" || r.type === "limit" || r.type === "stop_and_ask";
+const lower = (s: string) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+const label = (field: string) => field.replace(/_/g, " ");
 
 function ruleExplains(rules: Rule[], event: ScreenEvent, policy: string): boolean {
   if (!event.field || event.to === undefined) return false;
@@ -91,9 +211,8 @@ export async function analyzeFrame(req: VisionRequest): Promise<VisionResponse> 
       body: JSON.stringify({
         model,
         max_tokens: 1024,
-        // Sonnet 5.5 thinks up front unless this is set. No tools, so this skips that block.
-        thinking: { type: "between_tools" },
-        output_config: { effort: "low" },
+        // Sonnet 5.5 thinks up front unless this is set (no tools, so it skips that block); Haiku rejects it.
+        ...thinkingConfig(model),
         system,
         messages: [
           {
@@ -365,4 +484,69 @@ if (process.argv.includes("--check")) {
     console.error(error);
     process.exit(1);
   });
+}
+
+
+// ---------- App discovery: one frame -> the screen map of an unknown app ----------
+
+const DISCOVER_PROMPT = `You are looking at one screenshot of a desk-job application. Describe its data entry screen as JSON only:
+{"record_type": "<singular noun for the thing being edited, e.g. return, invoice, ticket>",
+ "fields": [{"key": "<snake_case from the visible label>", "label": "<label exactly as shown>", "type": "text|money|date|select|status", "options": ["..."]}],
+ "actions": [{"key": "<snake_case from the button label>", "label": "<button label exactly as shown>", "sets": {"status": "<status this button likely sets, if any>"}}]}
+Rules: only fields and buttons that are actually visible. A dropdown is "select" with its visible options; the record's state field is "status".
+Money fields are "money", dates are "date". Do not invent fields. No prose, JSON only.`;
+
+/** Learn an unknown app's layout from one frame. Returns an empty screen on any failure. */
+export async function discoverScreen(frameJpegBase64: string): Promise<JobProfile["screen"]> {
+  const empty: JobProfile["screen"] = { record_type: "record", fields: [], actions: [] };
+  const frame = jpegPayload(frameJpegBase64);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.VISION_MODEL;
+  if (!frame || !apiKey || !model) return empty;
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model, max_tokens: 1500, ...thinkingConfig(model), system: DISCOVER_PROMPT,
+        messages: [{ role: "user", content: [
+          { type: "text", text: "Describe this screen." },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frame } },
+        ] }],
+      }),
+    });
+    if (!response.ok) return empty;
+    const payload = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
+    const text = (payload.content ?? []).filter((b) => b.type === "text" && b.text).map((b) => b.text).join("\n");
+    const raw = extractJson(text) as Partial<JobProfile["screen"]> | null;
+    if (!raw || !Array.isArray(raw.fields)) return empty;
+    const types = new Set(["text", "money", "date", "select", "status"]);
+    const fields = raw.fields
+      .filter((f) => f && typeof f.label === "string")
+      .map((f) => ({
+        key: snake(String(f.key || f.label)), label: String(f.label),
+        type: (types.has(String(f.type)) ? f.type : "text") as JobProfile["screen"]["fields"][number]["type"],
+        ...(Array.isArray(f.options) && f.options.length ? { options: f.options.map(String) } : {}),
+      }));
+    const actions = (Array.isArray(raw.actions) ? raw.actions : [])
+      .filter((a) => a && typeof a.label === "string")
+      .map((a) => ({ key: snake(String(a.key || a.label)), label: String(a.label), sets: sanitizeSets(a.sets) }));
+    return { record_type: typeof raw.record_type === "string" && raw.record_type ? raw.record_type : "record", fields, actions };
+  } catch {
+    return empty;
+  }
+}
+
+/** Models that reject thinking/effort params (Haiku) get neither; Sonnet 5.5 needs them to skip up-front thinking. */
+function thinkingConfig(model: string): Record<string, unknown> {
+  if (/haiku/i.test(model)) return {};
+  return { thinking: { type: "between_tools" }, output_config: { effort: "low" } };
+}
+const snake = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "field";
+function sanitizeSets(v: unknown): Record<string, Value> {
+  const out: Record<string, Value> = {};
+  if (v && typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof x === "string" || typeof x === "number" || x === null) out[snake(k)] = x;
+  }
+  return out;
 }

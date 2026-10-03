@@ -23,7 +23,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             <FakeApp key={`expert-${id}`} profile={profile} />
           </div>
           <div className="min-h-[24rem]">
-            <ApprenticePanel jobId={id} escalateTo={profile.job.escalate_to} />
+            <ApprenticePanel jobId={id} escalateTo={profile.job.escalate_to} screenFields={profile.screen.fields.length} />
           </div>
         </main>
       )}

@@ -2,33 +2,39 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import type { ScreenEvent, WorkMap } from "@understudy/shared";
-import { startCapture } from "@understudy/engine";
+import type { ScreenEvent, ScreenState, WorkMap } from "@understudy/shared";
+import { startCapture, type CaptureHandle } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
 import { resetSession, screenEvents, sessionT } from "@/lib/session";
 import { sessionStats } from "@/lib/stats";
 import { useFlag } from "@/lib/flags";
 import { useInterviewLoop } from "@/lib/useInterviewLoop";
-import { rebuildWorkMap, workMaps } from "@/lib/workmap";
+import { rebuildWorkMap, useWorkMap } from "@/lib/workmap";
+import DiscoveryReview, { type Discovered } from "@/components/DiscoveryReview";
 
 /** Live feed of what the apprentice saw on screen, plus the voice agent. */
-interface PanelProps { jobId: string; escalateTo: string; expert?: string; }
+interface PanelProps { jobId: string; escalateTo: string; expert?: string; screenFields?: number; }
 
-export default function ApprenticePanel({ jobId, escalateTo, expert = "Aarav" }: PanelProps) {
+export default function ApprenticePanel({ jobId, escalateTo, expert = "Aarav", screenFields = 0 }: PanelProps) {
   return (
     <ApprenticeVoiceProvider>
-      <Panel jobId={jobId} escalateTo={escalateTo} expert={expert} />
+      <Panel jobId={jobId} escalateTo={escalateTo} expert={expert} screenFields={screenFields} />
     </ApprenticeVoiceProvider>
   );
 }
 
-function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
+function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>) {
   const events = useSyncExternalStore(screenEvents.subscribe, screenEvents.all, noEvents);
-  const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
+  const map = useWorkMap(jobId, expert);
+  const briefing = useBriefing(jobId);
+  const screenRef = useRef<ScreenState | null>(null);
+  const [found, setFound] = useState<Discovered | null>(null);
+  const discovering = useRef(false);
+  const discoveredOnce = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [watching, setWatching] = useState(false);
   const [preparing, setPreparing] = useState(false);
-  const capture = useRef<{ stop(): void } | null>(null);
+  const capture = useRef<CaptureHandle | null>(null);
   const agentRef = useRef<ApprenticeAgent | null>(null);
 
   const history = () => ({ jobId, expert, events: screenEvents.all(), transcript: agentRef.current?.transcript ?? [] });
@@ -37,6 +43,7 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
     expert,
     escalateTo,
     workMap: map,
+    briefing,
     now: sessionT,
     onError: setError,
     // Expert said yes to the teach-back: rebuild with every correction, then confirm so rules enforce.
@@ -58,6 +65,8 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
   // Voice owns the off-the-record state (button or the expert saying it). Mirror it into the timeline gaps.
   useEffect(() => {
     offRecordRef.current = offRecord;
+    if (offRecord) capture.current?.pause(); // off the record: no frames leave the browser
+    else capture.current?.resume();
     const t = sessionT();
     sessionStats.update(jobId, (st) => {
       const open = st.offRecord.find((w) => w.end === null);
@@ -68,7 +77,27 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
   }, [offRecord, jobId]);
 
   const toggleOffRecord = () => agent.sendContext({ kind: "off_record", on: !offRecord });
-  const loop = useInterviewLoop({ agent, active: watching && !inDebrief && !offRecord, jobId, expert, now: sessionT });
+  const loop = useInterviewLoop({
+    agent, active: watching && !inDebrief && !offRecord, jobId, expert, now: sessionT, screen: () => screenRef.current,
+  });
+
+  /** App discovery: learn the layout from one frame (first share for a job with no screen map, or on demand). */
+  async function discover(frame: string | null | undefined) {
+    if (!frame || discovering.current) return;
+    discovering.current = true;
+    try {
+      const res = await fetch("/api/discover", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ job_id: jobId, frame_jpeg_base64: frame }),
+      });
+      if (res.ok) setFound((await res.json()) as Discovered);
+    } catch {
+      /* discovery is optional */
+    } finally {
+      discovering.current = false;
+    }
+  }
 
   async function startDebrief() {
     setPreparing(true);
@@ -91,8 +120,15 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
     if (screenEvents.all().length === 0) resetSession();
     try {
       capture.current = await startCapture({
+        onFrame: (frame) => {
+          if (screenFields === 0 && !discoveredOnce.current) {
+            discoveredOnce.current = true;
+            void discover(frame);
+          }
+        },
         onResult: (r) => {
           if (offRecordRef.current) return; // off the record: nothing is kept or forwarded
+          screenRef.current = r.screen_state;
           for (const raw of r.events) {
             // One clock for events and transcript: stamp with the session time it arrived.
             const event = { ...raw, t: sessionT() };
@@ -210,6 +246,16 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {found && (
+          <DiscoveryReview
+            jobId={jobId}
+            found={found}
+            onDone={() => {
+              setFound(null);
+              window.location.reload(); // the page re-renders the fake app from the saved screen map
+            }}
+          />
+        )}
         {inDebrief && <DebriefCard agent={agent} jobId={jobId} map={map} />}
 
         {loop.asked.length > 0 && (
@@ -235,7 +281,18 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
           </section>
         )}
 
-        <p className="pb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Screen events</p>
+        <div className="flex items-center justify-between pb-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Screen events</p>
+          {watching && !found && (
+            <button
+              onClick={() => discover(capture.current?.grab())}
+              title="Learn this app's fields and buttons from the current frame"
+              className="text-xs font-medium text-sky-700 hover:underline dark:text-sky-300"
+            >
+              Learn this app
+            </button>
+          )}
+        </div>
         {events.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
             Events appear here as ExpertAI notices changes.
@@ -298,10 +355,27 @@ function Panel({ jobId, escalateTo, expert }: Required<PanelProps>) {
   );
 }
 
+/** The role briefing for this job (what ExpertAI already knows), fetched once; also synced to the agents' knowledge base. */
+function useBriefing(jobId: string): string | null {
+  const [briefing, setBriefing] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/briefing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ job_id: jobId }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { briefing?: string } | null) => {
+        if (!cancelled && b?.briefing) setBriefing(b.briefing);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+  return briefing;
+}
+
 const EMPTY_EVENTS: ScreenEvent[] = [];
 const noEvents = () => EMPTY_EVENTS;
-const noMap = (): WorkMap | null => null;
-const emptyMap = (job_id: string, expert: string): WorkMap => ({ job_id, expert, steps: [], rules: [], open_gaps: [] });
+const emptyMap = (job_id: string, expert: string) => ({ job_id, expert, steps: [], rules: [], open_gaps: [] });
 
 const PHASES = [
   { key: "asking", label: "Questions" },

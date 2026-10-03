@@ -40,7 +40,12 @@ export interface GateSignals {
 export interface GateResult { open: boolean; reason: string; }
 // engine: gate(signals: GateSignals): GateResult   (open after 1500ms quiet on all three)
 
-export interface QuestionPick { question: string; about_event_id: string; is_guardrail: boolean; }
+export interface QuestionPick {
+  question: string; about_event_id: string; is_guardrail: boolean;
+  kind?: "contradiction" | "unexplained" | "follow_up" | "confirmation" | "guardrail";  // why the ranker chose it
+  reason?: string;              // one line for the audit log, e.g. "contradicts baseline bl-ret-2"
+  rule_id?: string;             // baseline rule involved, if any
+}
 // engine (server): pickQuestion(recent: ScreenEvent[], map: WorkMap, policy: string, transcript?: TranscriptLine[]): Promise<QuestionPick | null>
 
 export interface StuckSignals {
@@ -112,6 +117,7 @@ export interface CheckResult {
   explanation?: string;
   clip_id?: string;
   screen_moment?: ScreenMoment;
+  standard?: boolean;           // true when an unconfirmed baseline rule fired because no company rule covers the case
 }
 // brain: checkAction(a: ProposedAction, map: WorkMap): CheckResult
 

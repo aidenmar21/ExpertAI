@@ -76,9 +76,13 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
     case "guardrail_hit": {
       const { check } = m;
       const parts = [
-        `[GUARDRAIL] The new hire is about to break a rule. Their save is paused.`,
-        `Say only: "${expert} would stop here. Why do you think?" Then stop talking and wait for their answer.`,
-        `After they answer, explain with ${expert}'s reason below, quoting them.`,
+        check.standard
+          ? `[GUARDRAIL] The new hire is about to go against the industry standard. No company rule covers this case yet. Their save is paused.`
+          : `[GUARDRAIL] The new hire is about to break a rule. Their save is paused.`,
+        check.standard
+          ? `Say: "Most people in this job would stop here. Why do you think?" Then wait. After they answer, explain that the industry standard is the rule below, that ${expert} has not said otherwise, and that they should check with their manager if unsure.`
+          : `Say only: "${expert} would stop here. Why do you think?" Then stop talking and wait for their answer.`,
+        check.standard ? "" : `After they answer, explain with ${expert}'s reason below, quoting them.`,
       ];
       const quote = check.rule?.reason_quote ? oneLine(check.rule.reason_quote) : "";
       if (check.rule) {
@@ -88,8 +92,8 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
       }
       // brain's explanation repeats the rule and quote; only add it when it says something new.
       if (check.explanation && !(quote && check.explanation.includes(quote))) parts.push(sentence(`Why: ${oneLine(check.explanation)}`));
-      if (check.clip_id || check.screen_moment) parts.push(`A replay of ${expert}'s screen moment is available.`);
-      return parts.join(" ");
+      if (!check.standard && (check.clip_id || check.screen_moment)) parts.push(`A replay of ${expert}'s screen moment is available.`);
+      return parts.filter(Boolean).join(" ");
     }
 
     case "stuck":

@@ -5,7 +5,9 @@ import { join } from "node:path";
 import type {
   JobProfile, Rule, ScreenEvent, TranscriptLine, Value, WorkMap, WorkMapStep,
 } from "@understudy/shared";
-import { canonicalEvents, emptyWorkMap, onRecordOnly, redact, redactDeep, redactTranscript } from "./index";
+import { canonicalEvents, emptyWorkMap, onRecordOnly, reconcileBaseline, redact, redactDeep, redactTranscript } from "./index";
+import { baselineRulesFor } from "./knowledge";
+export * from "./knowledge";
 import { score, runTutorCases, rulesLearned, type ScoreInput, type TutorCaseResult } from "./eval";
 import {
   applyCorrections, applyLinks, captureDecisions, linksToCorrections, recordsToGaps, unlinkedExpertLines, validateLinks,
@@ -303,7 +305,11 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   const cases = expertCases(job, onRecordOnly(events, transcript).events, (rec) => screenValues(job, rec));
   const extractedNow = await extractRules(todo, job, cases);
 
-  const rules = [...kept, ...extractedNow.rules];
+  // Baseline (industry standard) and written policy rules are not built from the transcript: they carry over as-is,
+  // then each baseline rule is confirmed or overridden by the expert's own rules.
+  const carried = (prev?.rules ?? []).filter((x) => x.source === "baseline" || x.source === "policy");
+  const learned = [...kept, ...extractedNow.rules];
+  const rules = [...reconcileBaseline(carried, learned), ...learned];
   const rule_sources: Record<string, RuleEvidence> = {};
   for (const x of kept) rule_sources[x.id] = prevEvidence[x.id];
   Object.assign(rule_sources, extractedNow.evidence);
@@ -333,11 +339,18 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
   }, pii);
 }
 
-// Teach-back confirmed: mark every grounded record and every rule confirmed. Only confirmed rules enforce in checkAction.
+/** A fresh Work Map for a job: no steps yet, seeded with the role's baseline rules as unconfirmed industry standard. */
+export function seedWorkMap(job_id: string, expert: string): WorkMapWithRecords {
+  const job = loadJob(job_id);
+  return { ...emptyWorkMap(job_id, expert), rules: baselineRulesFor(job?.job.role_id), records: [] };
+}
+
+// Teach-back confirmed: mark every grounded record and every rule the expert actually taught confirmed.
+// Baseline and policy rules stay as they are: they confirm only when the expert matches or accepts them.
 export function confirmWorkMap(map: WorkMapWithRecords, at = new Date().toISOString()): WorkMapWithRecords {
   return {
     ...map,
-    rules: map.rules.map((r) => ({ ...r, confirmed: true })),
+    rules: map.rules.map((r) => (r.source === "baseline" || r.source === "policy" ? r : { ...r, confirmed: true })),
     records: map.records.map((r) => (r.why !== null ? { ...r, status: "confirmed" as const } : r)),
     confirmed_at: at,
   };

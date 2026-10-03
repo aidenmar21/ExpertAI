@@ -35,11 +35,22 @@ export function detectStuck(_signals: StuckSignals): StuckResult {
  * that actually changed to /api/vision. The client keeps the last screen_state
  * and sends it back as previous_state.
  */
+export interface CaptureHandle {
+  stop(): void;
+  /** Off the record: keep the share open but stop sampling and sending frames. */
+  pause(): void;
+  resume(): void;
+  /** One frame now (JPEG base64, no data-url prefix), e.g. for app discovery. */
+  grab(): string | null;
+}
+
 export async function startCapture(opts: {
   onResult: (r: VisionResponse) => void;
+  /** Every frame that was sent for analysis (JPEG base64), before the result comes back. */
+  onFrame?: (jpegBase64: string) => void;
   endpoint?: string;
   intervalMs?: number;
-}): Promise<{ stop(): void }> {
+}): Promise<CaptureHandle> {
   const endpoint = opts.endpoint || "/api/vision";
   const intervalMs = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : 1500;
 
@@ -69,8 +80,19 @@ export async function startCapture(opts: {
   let previousState: ScreenState | null = null;
   const startedAt = performance.now();
 
+  let paused = false;
+  function drawFrame(): boolean {
+    if (video.readyState < 2 || video.videoWidth === 0) return false;
+    const width = Math.min(TARGET_WIDTH, video.videoWidth);
+    const height = Math.max(1, Math.round(video.videoHeight * (width / video.videoWidth)));
+    canvas.width = width;
+    canvas.height = height;
+    ctx.drawImage(video, 0, 0, width, height);
+    return true;
+  }
+
   async function tick(): Promise<void> {
-    if (stopped || inFlight || video.readyState < 2 || video.videoWidth === 0) return;
+    if (stopped || paused || inFlight || video.readyState < 2 || video.videoWidth === 0) return;
     const width = Math.min(TARGET_WIDTH, video.videoWidth);
     const height = Math.max(1, Math.round(video.videoHeight * (width / video.videoWidth)));
     canvas.width = width;
@@ -90,6 +112,7 @@ export async function startCapture(opts: {
     };
 
     inFlight = true;
+    opts.onFrame?.(frame);
     try {
       const res = await fetch(endpoint, {
         method: "POST",
@@ -123,11 +146,23 @@ export async function startCapture(opts: {
     video.srcObject = null;
   }
 
+  function grab(): string | null {
+    if (stopped || !drawFrame()) return null;
+    const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    const comma = dataUrl.indexOf(",");
+    return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  }
+
   stream.getVideoTracks().forEach((track) => {
     track.addEventListener("ended", stop);
   });
 
-  return { stop };
+  return {
+    stop,
+    grab,
+    pause: () => { paused = true; },
+    resume: () => { paused = false; lastSample = null; },
+  };
 }
 
 async function captureDisplay(): Promise<MediaStream> {

@@ -1,13 +1,16 @@
-import type { QuestionPick, ScreenEvent, TranscriptLine, WorkMap } from "@understudy/shared";
+import type { QuestionPick, ScreenEvent, ScreenState, TranscriptLine, WorkMap } from "@understudy/shared";
 import { pickQuestion } from "@understudy/engine/server";
+import { baselineRulesFor, roleById } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/job";
 
-interface QuestionRequest { job_id: string; recent: ScreenEvent[]; transcript: TranscriptLine[]; map: WorkMap; }
-
-// Engine may take the transcript as an optional 4th argument; extra args are harmless until it does.
-const pick = pickQuestion as (
-  recent: ScreenEvent[], map: WorkMap, policy: string, transcript?: TranscriptLine[],
-) => Promise<QuestionPick | null>;
+interface QuestionRequest {
+  job_id: string;
+  recent: ScreenEvent[];
+  transcript: TranscriptLine[];
+  map: WorkMap;
+  screen?: ScreenState | null;   // latest screen state from capture
+  asked_guardrail?: boolean;     // has a guardrail question been asked this session
+}
 
 export async function POST(request: Request) {
   let body: QuestionRequest;
@@ -20,8 +23,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "expected { job_id, recent, transcript, map }" }, { status: 400 });
   }
   try {
-    const policy = loadJob(body.job_id).job.written_policy;
-    const result: QuestionPick | null = await pick(body.recent, body.map, policy, body.transcript ?? []);
+    const job = loadJob(body.job_id);
+    const result: QuestionPick | null = await pickQuestion(body.recent, body.map, job.job.written_policy, body.transcript ?? [], {
+      baseline: baselineRulesFor(job.job.role_id),
+      screen: body.screen ?? null,
+      job,
+      askedGuardrail: body.asked_guardrail ?? false,
+      roleName: roleById(job.job.role_id)?.name,
+    });
     return Response.json(result);
   } catch (err) {
     console.error("[api/question]", err);

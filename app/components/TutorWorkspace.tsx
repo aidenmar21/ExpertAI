@@ -10,7 +10,7 @@ import FakeApp from "@/components/FakeApp";
 import { EventRow } from "@/components/ApprenticePanel";
 import type { ClientJob, JobRecord } from "@/lib/job";
 import { activity, screenEvents, sessionT } from "@/lib/session";
-import { workMaps } from "@/lib/workmap";
+import { useWorkMap, workMaps } from "@/lib/workmap";
 import { sessionStats } from "@/lib/stats";
 import { flag } from "@/lib/flags";
 
@@ -27,7 +27,8 @@ export default function TutorWorkspace({ profile }: { profile: ClientJob }) {
 
 function Tutor({ profile }: { profile: ClientJob }) {
   const jobId = profile.job.id;
-  const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
+  const map = useWorkMap(jobId);
+  const briefing = useTutorBriefing(jobId);
   const expert = map?.expert || "The expert";
   const [blocked, setBlocked] = useState<{ action: string; check: CheckResult } | null>(null);
   const [replay, setReplay] = useState(false);
@@ -36,11 +37,15 @@ function Tutor({ profile }: { profile: ClientJob }) {
     expert,
     escalateTo: profile.job.escalate_to,
     workMap: map,
+    briefing,
     now: sessionT,
     onReplayRequested: () => setReplay(true),
+    // Neither a company rule nor the standard covers it: it becomes an open gap for the next expert session.
+    onNewCase: (summary) => workMaps.addGap(jobId, { id: `gap-${Date.now()}`, question: `New hire case: ${summary}` }),
   });
 
   const confirmedRules = map?.rules.filter((r) => r.confirmed).length ?? 0;
+  const standardRules = map?.rules.filter((r) => r.source === "baseline" && !r.confirmed && !r.overridden_by).length ?? 0;
 
   // Runs before every save. Not ok: block it, tell the tutor, offer the expert's moment.
   function beforeAction(action: string, record: JobRecord, caseIndex: number): boolean {
@@ -84,7 +89,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
         <FakeApp profile={profile} mode="new_hire" beforeAction={beforeAction} notice={notice} />
       </div>
       <div className="min-h-[24rem]">
-        <TutorPanel agent={agent} jobId={jobId} confirmedRules={confirmedRules} hasMap={!!map} />
+        <TutorPanel agent={agent} jobId={jobId} confirmedRules={confirmedRules} standardRules={standardRules} hasMap={!!map} />
       </div>
     </main>
   );
@@ -94,11 +99,13 @@ function TutorPanel({
   agent,
   jobId,
   confirmedRules,
+  standardRules,
   hasMap,
 }: {
   agent: ApprenticeAgent;
   jobId: string;
   confirmedRules: number;
+  standardRules: number;
   hasMap: boolean;
 }) {
   const events = useSyncExternalStore(screenEvents.subscribe, screenEvents.all, noEvents);
@@ -205,8 +212,8 @@ function TutorPanel({
           {!hasMap
             ? "No Work Map yet. Record the expert first."
             : confirmedRules === 0
-              ? "Work Map not confirmed yet, so no rules are enforced"
-              : `${confirmedRules} confirmed rule${confirmedRules > 1 ? "s" : ""} enforced`}
+              ? `No company rules confirmed yet; ${standardRules} industry-standard rules speak up when nothing else covers a case`
+              : `${confirmedRules} company rule${confirmedRules > 1 ? "s" : ""} enforced, ${standardRules} industry-standard fallbacks`}
         </p>
         {!hasMap && (
           <Link href={`/?job=${jobId}`} className="mt-2 inline-block text-xs font-medium text-sky-700 hover:underline dark:text-sky-300">
@@ -301,10 +308,17 @@ function GuardrailNotice({
 
   return (
     <div className="mx-6 mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
-      <p className="text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">Paused before saving</p>
-      <p className="mt-1 font-medium text-amber-950 dark:text-amber-100">
-        {expert} would stop here before &ldquo;{actionLabel}&rdquo;.
+      <p className="text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">
+        {check.standard ? "Paused · industry standard" : "Paused before saving"}
       </p>
+      <p className="mt-1 font-medium text-amber-950 dark:text-amber-100">
+        {check.standard ? `Most people in this job would stop here before "${actionLabel}".` : `${expert} would stop here before "${actionLabel}".`}
+      </p>
+      {check.standard && (
+        <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+          This is the industry standard, not a rule {expert} gave. Check with your manager if unsure.
+        </p>
+      )}
       {check.rule && (
         <blockquote className="mt-2 border-l-2 border-amber-400 pl-3 text-sm italic text-amber-900 dark:text-amber-200">
           &ldquo;{check.rule.reason_quote}&rdquo;
@@ -344,7 +358,22 @@ function GuardrailNotice({
   );
 }
 
-const noMap = (): WorkMap | null => null;
+function useTutorBriefing(jobId: string): string | null {
+  const [briefing, setBriefing] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/briefing?job=${encodeURIComponent(jobId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { briefing?: string } | null) => {
+        if (!cancelled && b?.briefing) setBriefing(b.briefing);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+  return briefing;
+}
 const EMPTY_EVENTS: ScreenEvent[] = [];
 const noEvents = () => EMPTY_EVENTS;
 const formatT = (ms: number) => {

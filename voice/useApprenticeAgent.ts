@@ -41,6 +41,8 @@ export interface ApprenticeAgentOptions {
   escalateTo?: string;
   /** Current Work Map. Sent to the agent as silent context on connect and whenever it changes. */
   workMap?: WorkMap | null;
+  /** Role briefing (what ExpertAI already knows about this job); sent once per connection as silent context. */
+  briefing?: string | null;
   /** App route returning a WebRTC conversation token for ?mode=. Default "/api/voice/token". */
   tokenEndpoint?: string;
   /** Public agent id. If set, connects directly and skips the token route. */
@@ -253,9 +255,16 @@ export function useApprenticeAgent(mode: AgentMode, opts: ApprenticeAgentOptions
     optsRef.current.onTranscript?.(line);
   };
 
+  const sentBriefingRef = useRef<string | null>(null);
   const sendWorkMap = () => {
+    if (convRef.current.status !== "connected") return;
+    const briefing = optsRef.current.briefing;
+    if (briefing && briefing !== sentBriefingRef.current) {
+      sentBriefingRef.current = briefing;
+      push(`[ROLE BRIEFING]\n${briefing}`, "context");
+    }
     const map = optsRef.current.workMap;
-    if (!map || map === sentMapRef.current || convRef.current.status !== "connected") return;
+    if (!map || map === sentMapRef.current) return;
     sentMapRef.current = map;
     push(formatWorkMapContext(map), "context");
   };
@@ -267,7 +276,8 @@ export function useApprenticeAgent(mode: AgentMode, opts: ApprenticeAgentOptions
     },
     onConnect: () => {
       setError(null);
-      sentMapRef.current = null; // new conversation: the agent needs the Work Map again
+      sentMapRef.current = null; // new conversation: the agent needs the briefing and Work Map again
+      sentBriefingRef.current = null;
     },
     onDisconnect: () => {
       agentSpeakingRef.current = false;

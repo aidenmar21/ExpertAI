@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import type { Condition, Rule, RuleType, WorkMap } from "@understudy/shared";
-import { workMaps } from "@/lib/workmap";
+import { differsFromStandard, useWorkMap, workMaps } from "@/lib/workmap";
+import KnowledgeBox from "@/components/KnowledgeBox";
 import { sessionStats } from "@/lib/stats";
 import Scoreboard from "@/components/Scoreboard";
 
@@ -20,7 +21,10 @@ const OP_WORDS: Record<Condition["op"], string> = {
 };
 
 export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName: string }) {
-  const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
+  const map = useWorkMap(jobId);
+  const differs = differsFromStandard(map);
+  const company = map ? map.rules.filter((r) => r.source !== "baseline" || r.confirmed) : [];
+  const standard = map ? map.rules.filter((r) => r.source === "baseline" && !r.confirmed) : [];
   const stats = useSyncExternalStore(sessionStats.subscribe, () => sessionStats.get(jobId), () => sessionStats.get(jobId));
   const gaps = stats.offRecord;
 
@@ -36,6 +40,11 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
             {jobName}
             {map?.expert ? ` · learned from ${map.expert}` : ""}
           </p>
+          {map && (
+            <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+              At your company, {differs} rule{differs === 1 ? "" : "s"} differ{differs === 1 ? "s" : ""} from the industry standard.
+            </p>
+          )}
         </div>
         {map && (
           <div className="flex items-center gap-3">
@@ -66,8 +75,8 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
         <>
           <dl className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="Steps" value={map.steps.length} />
-            <Stat label="Rules" value={map.rules.length} />
-            <Stat label="Guardrails" value={map.rules.filter((r) => r.type === "guardrail").length} />
+            <Stat label="Company rules" value={company.length} />
+            <Stat label="Industry standard" value={standard.length} />
             <Stat label="Open gaps" value={map.open_gaps.length} />
           </dl>
 
@@ -95,15 +104,33 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
 
             <section className="lg:col-span-3">
               <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500">Rules, in the expert&rsquo;s words</h2>
-              {map.rules.length === 0 ? (
-                <p className="mt-4 text-sm text-slate-500">No rules yet.</p>
+              {company.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">No company rules yet. Run an expert session, or write company knowledge below.</p>
               ) : (
                 <ul className="mt-4 space-y-4">
-                  {map.rules.map((r) => (
+                  {company.map((r) => (
                     <RuleCard key={r.id} rule={r} />
                   ))}
                 </ul>
               )}
+
+              {standard.length > 0 && (
+                <>
+                  <h2 className="mt-10 text-xs font-medium uppercase tracking-wider text-slate-500">
+                    Industry standard · confirm or override
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    What ExpertAI already knew about this role. Each one flips to a company rule when the expert confirms it, or is replaced when they do it differently.
+                  </p>
+                  <ul className="mt-4 space-y-3">
+                    {standard.map((r) => (
+                      <RuleCard key={r.id} rule={r} overriddenBy={r.overridden_by ? map.rules.find((x) => x.id === r.overridden_by) : undefined} />
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              <KnowledgeBox jobId={jobId} />
 
               {map.open_gaps.length > 0 && (
                 <>
@@ -128,7 +155,8 @@ export default function WorkMapView({ jobId, jobName }: { jobId: string; jobName
   );
 }
 
-function RuleCard({ rule }: { rule: Rule }) {
+function RuleCard({ rule, overriddenBy }: { rule: Rule; overriddenBy?: Rule }) {
+  const baseline = rule.source === "baseline" && !rule.confirmed;
   const then = [
     ...Object.entries(rule.then.must ?? {}).map(([k, v]) => `${k} must be ${v}`),
     ...Object.entries(rule.then.must_not ?? {}).map(([k, v]) => `${k} must not be ${v}`),
@@ -136,11 +164,32 @@ function RuleCard({ rule }: { rule: Rule }) {
     ...(rule.then.escalate_to ? [`ask ${rule.then.escalate_to}`] : []),
   ];
   return (
-    <li className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <li
+      className={
+        baseline
+          ? `rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 dark:border-slate-700 dark:bg-slate-900/40 ${overriddenBy ? "opacity-70" : ""}`
+          : "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+      }
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${TYPE_STYLE[rule.type]}`}>
           {rule.type.replace(/_/g, " ")}
         </span>
+        {baseline && (
+          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            {overriddenBy ? "overridden at your company" : "industry standard · unconfirmed"}
+          </span>
+        )}
+        {rule.source === "policy" && (
+          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
+            written
+          </span>
+        )}
+        {rule.source === "baseline" && rule.confirmed && (
+          <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+            matches the standard
+          </span>
+        )}
         {rule.confirmed && <span className="text-xs font-medium text-teal-700 dark:text-teal-300">✓ confirmed</span>}
         <span className="ml-auto text-xs tabular-nums text-slate-500">
           {formatT(rule.screen_moment.t)}
@@ -148,9 +197,14 @@ function RuleCard({ rule }: { rule: Rule }) {
         </span>
       </div>
       <p className="mt-3 font-medium text-slate-900 dark:text-slate-100">{rule.text}</p>
-      <blockquote className="mt-2 border-l-2 border-sky-400 pl-3 text-sm italic text-slate-600 dark:text-slate-300">
+      <blockquote className={`mt-2 border-l-2 pl-3 text-sm italic ${baseline ? "border-slate-300 text-slate-500 dark:border-slate-600" : "border-sky-400 text-slate-600 dark:text-slate-300"}`}>
         &ldquo;{rule.reason_quote}&rdquo;
       </blockquote>
+      {overriddenBy && (
+        <p className="mt-2 text-xs text-slate-500">
+          Here instead: <span className="font-medium text-slate-700 dark:text-slate-200">{overriddenBy.text}</span>
+        </p>
+      )}
       <dl className="mt-3 grid gap-1 text-xs text-slate-500">
         {rule.when.length > 0 && (
           <div>
@@ -229,7 +283,6 @@ function timeline(steps: WorkMap["steps"], gaps: { start: number; end: number | 
   return items.sort((a, b) => a.t - b.t);
 }
 
-const noMap = (): WorkMap | null => null;
 const formatT = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

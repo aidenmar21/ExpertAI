@@ -55,14 +55,22 @@ const SAFE_ACTIONS = new Set(["call_manager", "hold", "escalate", "send_to_contr
 export interface CheckOptions {
   job?: JobProfile;               // applies the action's `sets` before checking must / must_not
   includeUnconfirmed?: boolean;   // default false: only teach-back-confirmed rules enforce
+  baselineFallback?: boolean;     // default true: unconfirmed baseline rules speak when no company rule covers the case
 }
 
 export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions = {}): CheckResult {
   if (SAFE_ACTIONS.has(a.action)) return { ok: true };
   const sets = opts.job?.screen.actions.find((x) => x.key === a.action)?.sets ?? {};
   const after: Rec = { ...a.record, ...sets };
-  for (const rule of map.rules) {
-    if (!rule.confirmed && !opts.includeUnconfirmed) continue;
+  // Company rules first (anything confirmed, including baseline rules the expert matched). If no company rule
+  // covers the case at all, an unconfirmed baseline rule may speak as "the industry standard".
+  const company = map.rules.filter((r) => r.confirmed || opts.includeUnconfirmed);
+  const covered = company.some((r) => r.when.every((c) => evalCondition(c, a.record)));
+  const fallback = covered || opts.baselineFallback === false
+    ? []
+    : map.rules.filter((r) => r.source === "baseline" && !r.confirmed && !r.overridden_by);
+  for (const rule of [...company, ...fallback]) {
+    const standard = rule.source === "baseline" && !rule.confirmed;
     if (!rule.when.every((c) => evalCondition(c, a.record))) continue;
     // Escalation-only rules hold every non-handoff action; rules with explicit restrictions only enforce those.
     const t = rule.then;
@@ -74,12 +82,47 @@ export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions 
     return {
       ok: false,
       rule,
-      explanation: `${rule.text} (${why}). In the expert's words: "${rule.reason_quote}"`,
+      explanation: standard
+        ? `The industry standard is: ${rule.text} (${why}). This company has not said otherwise yet.`
+        : `${rule.text} (${why}). In the expert's words: "${rule.reason_quote}"`,
       clip_id: rule.clip_id,
       screen_moment: rule.screen_moment,
+      ...(standard ? { standard: true } : {}),
     };
   }
   return { ok: true };
+}
+
+/**
+ * Line the expert's own rules up against the baseline (industry standard) rules.
+ * Same conditions and same outcome: the baseline rule flips to confirmed with the expert's quote and clip.
+ * Same conditions, different outcome: the baseline rule is overridden by the expert's rule.
+ */
+export function reconcileBaseline(carried: Rule[], learned: Rule[]): Rule[] {
+  const fieldsOf = (r: Rule) => new Set(r.when.map((c) => c.field));
+  const sameFields = (x: Rule, y: Rule) => {
+    const a = fieldsOf(x), b = fieldsOf(y);
+    return a.size > 0 && a.size === b.size && [...a].every((f) => b.has(f));
+  };
+  const sameOutcome = (x: Rule, y: Rule) => JSON.stringify(normThen(x.then)) === JSON.stringify(normThen(y.then));
+  return carried.map((b) => {
+    if (b.source !== "baseline") return b;
+    const match = learned.find((l) => sameFields(b, l));
+    if (!match) return b;
+    if (sameOutcome(b, match) || (!!b.then.escalate_to && b.then.escalate_to === match.then.escalate_to)) {
+      return {
+        ...b, confirmed: true, overridden_by: undefined,
+        reason_quote: match.reason_quote, clip_id: match.clip_id, screen_moment: match.screen_moment,
+      };
+    }
+    return { ...b, confirmed: false, overridden_by: match.id };
+  });
+}
+function normThen(t: Rule["then"]) {
+  return {
+    must: t.must ?? {}, must_not: t.must_not ?? {},
+    must_not_action: [...(t.must_not_action ?? [])].sort(), escalate_to: t.escalate_to ?? "",
+  };
 }
 
 // ---------- Redaction ----------
