@@ -118,6 +118,7 @@ Strict grounding:
 - screen_values shows what was on screen for that case. Use it only to find the exact field and value for something the expert named (e.g. "access codes" -> item eq the on-screen access-code product). Use eq or in with the exact on-screen value(s).
 - Outcomes: must / must_not are field values after the action; must_not_action lists actions to block; escalate_to blocks every action except handing off. Prefer must_not_action when the expert only restricts some actions (e.g. "I call the manager before refunding" -> must_not_action [refund], escalate_to manager).
 - When one answer states several independent rules, emit them as separate rules.
+- status "corrected": the expert replaced their earlier reasoning (replaced_reasoning, context only, never quote it). Emit every rule the corrected quotes state, including changed limits ("the shift manager limit is two hundred dollars, not a hundred" -> price gt 200, escalate to the shift manager, blocking the actions the replaced rule blocked). Use the replaced reasoning only to understand what the limit or rule applies to. Quote and evidence must come from the corrected quotes.
 Return {"rules": []} if nothing is grounded.`;
 
 export interface ExtractResult {
@@ -155,8 +156,10 @@ export async function extractRules(records: DecisionRecord[], job: JobProfile, c
   const payload = {
     job: agentSafeJob(job),
     records: grounded.map((r) => ({
-      record_id: r.id, record: r.record, screen_values: screenValues(job, r.record), what: r.what, how: r.how, why: r.why,
+      record_id: r.id, record: r.record, status: r.status, screen_values: screenValues(job, r.record), what: r.what, how: r.how, why: r.why,
       exceptions: r.exceptions, guardrails: r.guardrails, escalate_to: r.escalate_to ?? null, quotes: r.quotes,
+      // Context only: what the correction replaced. Never quote it; reason_quote must come from `quotes`.
+      replaced_reasoning: r.superseded ? r.superseded.quotes : undefined,
     })),
   };
   try {

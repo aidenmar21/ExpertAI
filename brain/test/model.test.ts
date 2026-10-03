@@ -79,6 +79,7 @@ const show = (m: WorkMapWithRecords) => {
   console.log(`\n[3] after correction: ${fixed.rules.length} rules, ${Date.now() - t0}ms`);
   show(fixed);
   const fromX3 = fixed.rules.filter((x) => fixed.rule_sources![x.id].record_id === x3id);
+  assert.ok(fromX3.some((x) => x.when.some((c) => c.field === "price" && (c.op === "gt" || c.op === "gte") && Number(c.value) >= 199)), "corrected $200 limit rule extracted (see 'rejected:' lines above if missing)");
   assert.ok(fromX3.length >= 1, "corrected record re-extracted");
   assert.ok(fromX3.every((x) => !before.has(x.id) && !x.confirmed), "corrected rules are new and unconfirmed");
   assert.ok(!fixed.rules.some((x) => x.when.some((c) => c.field === "price" && c.value === 100)), "obsolete $100 rule gone");
