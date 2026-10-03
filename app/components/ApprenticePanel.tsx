@@ -61,6 +61,8 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
   useEffect(() => () => capture.current?.stop(), []);
 
   const inDebrief = agent.debrief !== "idle";
+  // Only rules this expert actually taught (or confirmed); unconfirmed industry-standard rules live on the Work Map page.
+  const learned = map?.rules.filter((r) => r.source !== "baseline" || r.confirmed) ?? [];
   const offRecord = agent.offRecord;
   const offRecordRef = useRef(false);
   const offRecordEnabled = useFlag("offRecord");
@@ -343,16 +345,16 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
           </ol>
         )}
 
-        {map && map.rules.length > 0 && (
+        {learned.length > 0 && (
           <section className="pt-6" aria-label="Learned rules">
             <div className="flex items-center justify-between gap-3 pb-3">
-              <p className={eyebrow}>Learned rules · {map.rules.length}</p>
+              <p className={eyebrow}>Learned rules · {learned.length}</p>
               <Link href={`/workmap?job=${jobId}`} className={`${link} text-meta font-medium`}>
                 Open Work Map
               </Link>
             </div>
             <ol className="space-y-2">
-              {map.rules.map((r) => (
+              {learned.map((r) => (
                 <li key={r.id} className="rounded-md bg-surface-subtle px-3.5 py-2.5 text-body">
                   <p className="font-medium text-ink">{r.text}</p>
                   <p className="mt-1 text-meta text-ink-secondary">&ldquo;{r.reason_quote}&rdquo;</p>
