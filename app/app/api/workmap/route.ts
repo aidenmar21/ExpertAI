@@ -1,6 +1,7 @@
 import type { Rule, ScreenEvent, TranscriptLine } from "@understudy/shared";
 import { appendAudit, buildWorkMap, confirmWorkMap, logModelCall, sessionFromHeaders, type AuditType, type WorkMapWithRecords } from "@understudy/brain/server";
 import { listJobIds } from "@/lib/job";
+import { saveServerMap } from "@/lib/serverMaps";
 
 interface WorkMapRequest {
   job_id: string;
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     const built = await buildWorkMap({ ...input, expert: input.expert || "Expert" });
     const map = confirm ? confirmWorkMap(built) : built;
     auditDiff(session, Date.now() - started, body.previous?.rules ?? [], map.rules, { expert: map.expert, confirm: !!confirm, confirmed_at: map.confirmed_at });
+    saveServerMap(body.job_id, map);
     return Response.json(map);
   } catch (err) {
     console.error("[api/workmap]", err);
