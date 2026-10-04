@@ -13,7 +13,7 @@ Four people, one repo, four parts. Follow in order.
 
 - Install: git, Node 20+, Python 3, Claude Code (logged in).
 - A GitHub account.
-- Everyone joins the SAME phone hotspot. Venue wifi often blocks the hub, and the hub injects messages into everyone's Claude, so only run it on a network you trust.
+- Everyone joins the SAME phone hotspot.
 
 ## Step 1: host only (Aarav, 5 min)
 
@@ -36,25 +36,7 @@ git clone https://github.com/<host>/understudy.git && cd understudy
 ```
 Run `npm install` from the repo root once the app owner has pushed the scaffolded Next.js app (it needs app/package.json to exist).
 
-## Step 4: start the hub (10 min, max 20)
-
-Host, terminal 1:
-```
-python3 hub.py
-ipconfig getifaddr en0     # Mac. Linux: hostname -I. Windows: ipconfig
-```
-Each teammate tests the connection, then starts their agent:
-```
-curl -m 3 http://HOST-IP:8765/log      # must print JSON
-HUB_URL=http://HOST-IP:8765 bin/agent <your-name>
-```
-Host, terminal 2: `bin/agent aarav`
-
-Dashboard: `http://HOST-IP:8765`
-
-**If curl fails for anyone after 20 minutes total: skip the hub.** Everyone runs plain `claude` in the repo and pastes their first prompt from below. The folders and contracts work the same without it.
-
-## Step 5: kick off
+## Step 4: kick off
 
 Host types to their Claude:
 
@@ -84,7 +66,6 @@ Teammates type: `go, I want engine` / `go, I want voice` / `go, I want brain`. T
 
 ## First hour checkpoint
 
-- [ ] Hub running (or skipped)
 - [ ] All 4 parts claimed, contracts confirmed
 - [ ] Every part pushed typed stubs
 - [ ] The fake returns app renders in the browser
