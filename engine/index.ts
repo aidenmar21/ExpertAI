@@ -15,6 +15,8 @@ const JPEG_QUALITY = 0.7;
 const SAMPLE_STRIDE = 8;
 const CHANNEL_DELTA = 28;
 const MIN_CHANGED_SAMPLES = 10;
+const ACTIVE_SAMPLE_MS = 750;
+const IDLE_SAMPLE_MS = 1000;
 
 /** Open only after 1.5s quiet on keyboard/mouse, speech, and screen changes. */
 export function gate(signals: GateSignals): GateResult {
@@ -77,7 +79,7 @@ export function detectStuck(s: StuckSignals): StuckResult {
 }
 
 /**
- * Capture the user's screen, sample about every 1.5s at ~768px, and POST frames
+ * Capture the user's screen, sample every 750ms while active / 1s idle, and POST frames
  * that actually changed to /api/vision. The client keeps the last screen_state
  * and sends it back as previous_state.
  */
@@ -98,7 +100,7 @@ export async function startCapture(opts: {
   intervalMs?: number;
 }): Promise<CaptureHandle> {
   const endpoint = opts.endpoint || "/api/vision";
-  const intervalMs = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : 1500;
+  const fixedInterval = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : null;
 
   const stream = await captureDisplay();
   const video = document.createElement("video");
@@ -121,8 +123,14 @@ export async function startCapture(opts: {
   const ctx = context;
 
   let stopped = false;
-  let inFlight = false;
+  let inFlight: AbortController | null = null;
   let lastSample: Uint8Array | null = null;
+  let lastWidth = 0;
+  let lastHeight = 0;
+  let generation = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastSampleAt = -Infinity;
+  let lastActivityAt = -Infinity;
   let previousState: ScreenState | null = null;
   const startedAt = performance.now();
 
@@ -137,17 +145,39 @@ export async function startCapture(opts: {
     return true;
   }
 
+  function interval(): number {
+    return fixedInterval ?? (performance.now() - lastActivityAt < 5000 ? ACTIVE_SAMPLE_MS : IDLE_SAMPLE_MS);
+  }
+
+  function schedule(delay = interval()): void {
+    clearTimeout(timer);
+    if (!stopped && !paused) timer = setTimeout(() => { void tick(); }, delay);
+  }
+
+  // Input in the hosting page is observable. Changes in a shared external window
+  // also keep sampling active for five seconds after the pixel diff sees them.
+  function onInput(): void {
+    if (stopped || paused) return;
+    lastActivityAt = performance.now();
+    schedule(Math.max(0, lastSampleAt + interval() - performance.now()));
+  }
+  const inputEvents = ["keydown", "pointerdown", "input", "wheel"] as const;
+  for (const event of inputEvents) window.addEventListener(event, onInput, { passive: true });
+
   async function tick(): Promise<void> {
-    if (stopped || paused || inFlight || video.readyState < 2 || video.videoWidth === 0) return;
-    const width = Math.min(TARGET_WIDTH, video.videoWidth);
-    const height = Math.max(1, Math.round(video.videoHeight * (width / video.videoWidth)));
-    canvas.width = width;
-    canvas.height = height;
-    ctx.drawImage(video, 0, 0, width, height);
+    if (stopped || paused) return;
+    if (inFlight || !drawFrame()) { schedule(); return; }
+    lastSampleAt = performance.now();
+    const { width, height } = canvas;
     const pixels = ctx.getImageData(0, 0, width, height).data;
     const sample = sampleFrame(pixels, width, height);
-    if (lastSample && !frameChanged(lastSample, sample)) return;
-
+    // Compare against the last analyzed frame, not the last timer tick. Include
+    // dimensions: a resized surface can have the same number of sampled pixels.
+    if (lastSample && width === lastWidth && height === lastHeight && !frameChanged(lastSample, sample)) {
+      schedule();
+      return;
+    }
+    lastActivityAt = performance.now();
     const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
     const comma = dataUrl.indexOf(",");
     const frame = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
@@ -157,36 +187,53 @@ export async function startCapture(opts: {
       t: Math.round(performance.now() - startedAt),
     };
 
-    inFlight = true;
-    opts.onFrame?.(frame);
+    const controller = new AbortController();
+    const requestGeneration = generation;
+    inFlight = controller;
+    let completed = false;
     try {
+      opts.onFrame?.(frame);
+      if (requestGeneration !== generation) return;
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
       if (!res.ok) return;
       const json = (await res.json()) as VisionResponse;
+      if (stopped || paused || requestGeneration !== generation) return;
       if (!json?.screen_state || !Array.isArray(json.events)) return;
       lastSample = sample;
+      lastWidth = width;
+      lastHeight = height;
       previousState = json.screen_state;
+      completed = true;
       opts.onResult(json);
     } catch {
-      // Leave lastSample unchanged so the next tick retries this frame.
+      // Leave lastSample unchanged so the next tick retries transport failures.
     } finally {
-      inFlight = false;
+      if (inFlight === controller) inFlight = null;
+      // Drain any change that happened during analysis immediately, without an
+      // extra sampling interval. Identical frames return to the normal cadence.
+      if (requestGeneration === generation) schedule(completed ? 0 : interval());
     }
   }
 
-  const timer = setInterval(() => {
-    void tick();
-  }, intervalMs);
   void tick();
+
+  function cancelPending(): void {
+    generation++;
+    clearTimeout(timer);
+    inFlight?.abort();
+    inFlight = null;
+  }
 
   function stop(): void {
     if (stopped) return;
     stopped = true;
-    clearInterval(timer);
+    cancelPending();
+    for (const event of inputEvents) window.removeEventListener(event, onInput);
     stream.getTracks().forEach((track) => track.stop());
     video.pause();
     video.srcObject = null;
@@ -206,8 +253,13 @@ export async function startCapture(opts: {
   return {
     stop,
     grab,
-    pause: () => { paused = true; },
-    resume: () => { paused = false; lastSample = null; },
+    pause: () => { paused = true; cancelPending(); },
+    resume: () => {
+      if (stopped || !paused) return;
+      paused = false;
+      lastSample = null;
+      schedule(0);
+    },
   };
 }
 
@@ -216,7 +268,7 @@ async function captureDisplay(): Promise<MediaStream> {
     throw new Error("This browser can't share the screen. Open the page in Chrome or Safari, then click Start watching.");
   }
   const attempts: DisplayMediaStreamOptions[] = [
-    { video: { frameRate: 2 }, audio: false },
+    { video: { frameRate: 4 }, audio: false },
     { video: true },
   ];
   let last: unknown;

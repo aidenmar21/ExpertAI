@@ -210,7 +210,7 @@ export async function analyzeFrame(req: VisionRequest): Promise<VisionResponse> 
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1024,
+        max_tokens: req.previous_state ? 512 : 1024,
         // Sonnet 5.5 thinks up front unless this is set (no tools, so it skips that block); Haiku rejects it.
         ...thinkingConfig(model),
         system,
@@ -229,30 +229,77 @@ export async function analyzeFrame(req: VisionRequest): Promise<VisionResponse> 
       }),
     });
     if (!response.ok) return noEvents(req.previous_state);
-    const payload = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
+    const payload = (await response.json()) as { stop_reason?: string; content?: Array<{ type?: string; text?: string }> };
+    if (payload.stop_reason === "max_tokens") return noEvents(req.previous_state);
     const text = (payload.content ?? [])
       .filter((block) => block.type === "text" && block.text)
       .map((block) => block.text)
       .join("\n");
-    const parsed = parseVisionPayload(extractJson(text), req.t);
+    const parsed = parseVisionPayload(extractJson(text), req.t, req.previous_state);
     return parsed ?? noEvents(req.previous_state);
   } catch {
     return noEvents(req.previous_state);
   }
 }
 
-function parseVisionPayload(raw: unknown, t: number): VisionResponse | null {
+function parseVisionPayload(raw: unknown, t: number, previous: ScreenState | null = null): VisionResponse | null {
   if (!raw || typeof raw !== "object") return null;
-  const body = raw as { screen_state?: unknown; events?: unknown };
-  const screen = parseScreenState(body.screen_state);
+  const body = raw as { screen_state?: unknown; screen_state_delta?: unknown; events?: unknown };
+  const screen = body.screen_state !== undefined
+    ? parseScreenState(body.screen_state)
+    : mergeScreenDelta(body.screen_state_delta, previous);
   if (!screen) return null;
   if (!Array.isArray(body.events)) return null;
   const events: ScreenEvent[] = [];
   for (const item of body.events) {
     const event = parseEvent(item, t);
-    if (event) events.push(event);
+    if (!event) continue;
+    // Compact model events refer to the state diff; public events remain complete.
+    if (event.field && (event.type === "field_changed" || event.type === "status_changed")) {
+      const sameRecord = previous && previous.view === screen.view
+        && previous.record.record_id === screen.record.record_id;
+      if ((event.from === undefined || event.to === undefined) && !sameRecord) continue;
+      if (event.from === undefined && previous && Object.hasOwn(previous.record, event.field)) {
+        event.from = previous.record[event.field];
+      }
+      if (event.to === undefined && Object.hasOwn(screen.record, event.field)) {
+        event.to = screen.record[event.field];
+      }
+      if (event.from === undefined || event.to === undefined || event.from === event.to) continue;
+      if (!event.detail) event.detail = `${event.field.replace(/_/g, " ")} changed from ${event.from} to ${event.to}`;
+    }
+    if (!event.record && screen.record.record_id != null) event.record = String(screen.record.record_id);
+    events.push(event);
   }
   return { screen_state: screen, events };
+}
+
+/** Internal model wire format only: callers still send/receive the shared contracts. */
+function mergeScreenDelta(raw: unknown, previous: ScreenState | null): ScreenState | null {
+  if (!previous || !raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const delta = raw as { record?: unknown; visible_warnings?: unknown; removed_fields?: unknown };
+  if (Object.keys(raw).some((key) => !["record", "visible_warnings", "removed_fields"].includes(key))) return null;
+  const record = { ...previous.record };
+  if (delta.record !== undefined) {
+    if (!delta.record || typeof delta.record !== "object" || Array.isArray(delta.record)) return null;
+    for (const [key, value] of Object.entries(delta.record)) {
+      const coerced = coerceValue(value);
+      if (coerced === undefined) return null;
+      // A new record needs a full state, otherwise old fields could leak into it.
+      if (key === "record_id" && coerced !== previous.record.record_id) return null;
+      record[key] = coerced;
+    }
+  }
+  if (delta.removed_fields !== undefined) {
+    if (!Array.isArray(delta.removed_fields) || !delta.removed_fields.every((key) => typeof key === "string")) return null;
+    for (const key of delta.removed_fields) delete record[key];
+  }
+  let warnings = previous.visible_warnings;
+  if (delta.visible_warnings !== undefined) {
+    if (!Array.isArray(delta.visible_warnings) || !delta.visible_warnings.every((item) => typeof item === "string")) return null;
+    warnings = delta.visible_warnings;
+  }
+  return { view: previous.view, record, visible_warnings: [...warnings] };
 }
 
 function parseScreenState(raw: unknown): ScreenState | null {
@@ -343,7 +390,7 @@ function userMessage(req: VisionRequest): string {
     "",
     `Frame timestamp: ${formatTimestamp(req.t)}`,
     "",
-    "Output JSON only, matching the schema in your instructions. Include screen_state and events.",
+    "Output compact JSON only. Use screen_state_delta for the same record/view; full screen_state on navigation. Include events.",
   ].join("\n");
 }
 
