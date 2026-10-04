@@ -57,7 +57,7 @@ import { checkAction } from "@understudy/brain";
 const res = checkAction({ action: "refund", record: currentRecordValues }, map, { job });
 if (!res.ok) { blockSave(); sendContext({ kind: "guardrail_hit", check: res }); replay(res.screen_moment, res.clip_id); }
 ```
-- Only **confirmed** rules enforce. Pass `{ includeUnconfirmed: true }` to preview.
+- Confirmed company rules enforce. If none covers the case, an active unconfirmed baseline can speak with `CheckResult.standard: true`; pass `{ baselineFallback: false }` to disable that fallback. Overridden baselines and baseline copies matched to company rules do not enforce. Pass `{ includeUnconfirmed: true }` to preview company rules before confirmation.
 - Pass `job` so the action's `sets` (e.g. `store_credit` sets `refund_method`) are applied before checking.
 - Handoff actions (`call_manager`, `hold`, `send_to_controller`, `request_info`) always pass.
 - `record` uses job field keys. `canonicalField(job, name)` maps vision labels (`refund_to`) to keys (`refund_method`).
@@ -136,5 +136,7 @@ export interface LineLink { line_t: number; record_id: string; kind: "why" | "ex
 Until then these types are exported from `@understudy/brain`.
 
 ## Tests
+- `test/regression.test.ts` adds simulated four-rule tutor coverage for N1–N5 (3/3 traps, zero false alarms), individual demo-rule boundaries, baseline fallback and reconciliation, decision overrides, derived fields, all eight roles' baseline condition fields/operators, mocked invoice-policy extraction, and audit tamper/concurrent-writer checks. It intercepts SDK requests and forbids network fetches. `test/audit-worker.ts` exercises separate processes sharing the audit file.
+- Audit appends hold a per-session atomic directory lock through reading, hashing, and writing. A failed append releases it; waiting writers time out after five seconds. A process killed while holding the lock can leave `<session>.jsonl.lock` behind: after confirming no writer is running, remove that empty directory before retrying. Verification reports the first broken entry's position, even if its stored sequence was tampered with.
 - `npm test -w brain`: **simulated**, no model call. Covers capture, picker, validation of 13 hand-written candidates (10 must be rejected) plus the two-sentence answer case, debrief linking, a spoken correction (with simulated model links), partial corrections, answer-key scoring for both jobs, and end-to-end redaction, confirmed-only enforcement, correction, Work Map without a key, scoring, and a browser bundle check.
 - `npm run test:model -w brain`: **real model**. Reads `ANTHROPIC_API_KEY` from env, `.env.local`, or `app/.env.local`. Runs `buildWorkMap` on the fixture session, checks grounding, gaps, off-record, scope (an opened novel must not be blocked), tutor results, a $100 -> $200 correction, a two-sentence answer that must give two separate rules, a spoken debrief + teach-back correction exactly as the app sends it (the no-receipt rule must survive a limit-only correction), and the scoreboard for the result. Exits 2 if no key is found.
