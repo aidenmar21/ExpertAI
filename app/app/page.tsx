@@ -4,13 +4,14 @@ import ApprenticePanel from "@/components/ApprenticePanel";
 import ModeNav from "@/components/ModeNav";
 import PopOut from "@/components/PopOut";
 import TutorWorkspace from "@/components/TutorWorkspace";
-import { listJobIds, loadJob, toClientJob } from "@/lib/job";
+import { toClientJob } from "@/lib/job";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 export default async function Home({ searchParams }: PageProps<"/">) {
   const { job = "returns-desk", mode } = await searchParams;
   const id = Array.isArray(job) ? job[0] : job;
-  if (!listJobIds().includes(id)) notFound();
-  const profile = toClientJob(loadJob(id));
+  if (!(await listJobIds()).includes(id)) notFound();
+  const profile = toClientJob(await loadJob(id));
   const tutor = mode === "tutor";
 
   return (

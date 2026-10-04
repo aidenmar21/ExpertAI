@@ -101,7 +101,10 @@ export const slugify = (name: string) =>
 export const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export function jobSummary(id: string): JobSummary {
-  const p = loadJob(id);
+  return summarizeJob(loadJob(id));
+}
+
+export function summarizeJob(p: JobProfile): JobSummary {
   const role = roleById(p.job.role_id);
   const ids = p.job.software_ids ?? role?.software ?? [];
   return {
@@ -130,6 +133,17 @@ export function createJob(input: CreateJobInput): JobProfile {
   if (!name || !id) throw new Error("invalid");
   if (listJobIds().includes(id) || fs.existsSync(path.join(JOBS_DIR, `${id}.json`))) throw new Error("exists");
 
+  const profile = makeJobProfile(input);
+  fs.mkdirSync(JOBS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(JOBS_DIR, `${id}.json`), JSON.stringify(profile, null, 2) + "\n");
+  return profile;
+}
+
+/** Pure profile factory shared by file and database repositories. */
+export function makeJobProfile(input: CreateJobInput): JobProfile {
+  const name = (input.name ?? "").trim();
+  const id = slugify(name);
+  if (!name || !id) throw new Error("invalid");
   const index = knowledgeIndex();
   const role = roleById(input.role_id ?? undefined);
   const known = new Set(index.software.map((s) => s.id));
@@ -151,7 +165,5 @@ export function createJob(input: CreateJobInput): JobProfile {
     records: { expert: [], new_hire: [] },
     hidden_rules: [],
   };
-  fs.mkdirSync(JOBS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(JOBS_DIR, `${id}.json`), JSON.stringify(profile, null, 2) + "\n");
   return profile;
 }

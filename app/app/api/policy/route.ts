@@ -1,6 +1,7 @@
+import { appendAudit, logModelCall } from "@/lib/db/audit";
 import type { Rule } from "@understudy/shared";
-import { appendAudit, logModelCall, parsePolicy, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
+import { parsePolicy, sessionFromHeaders } from "@understudy/brain/server";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 /** POST { job_id, text }: written company knowledge -> proposed rules (source "policy", unconfirmed). */
 export async function POST(request: Request) {
@@ -11,16 +12,16 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id) || typeof body.text !== "string") {
+  if (!(await listJobIds()).includes(id) || typeof body.text !== "string") {
     return Response.json({ error: "expected { job_id, text }" }, { status: 400 });
   }
   const session = sessionFromHeaders(request.headers);
   const started = Date.now();
   try {
-    const rules: Rule[] = await parsePolicy(body.text, loadJob(id));
+    const rules: Rule[] = await parsePolicy(body.text, (await loadJob(id)));
     try {
-      logModelCall(session, { model: process.env.LLM_MODEL, prompt_version: "policy-v1", latency_ms: Date.now() - started, redacted: true, purpose: "policy" });
-      appendAudit(session, { actor: "expert", type: "policy_parsed", payload: { job_id: id, n_rules: rules.length, text_length: body.text.length, rule_ids: rules.map((r) => r.id) } });
+      await logModelCall(session, { model: process.env.LLM_MODEL, prompt_version: "policy-v1", latency_ms: Date.now() - started, redacted: true, purpose: "policy" });
+      await appendAudit(session, { actor: "expert", type: "policy_parsed", payload: { job_id: id, n_rules: rules.length, text_length: body.text.length, rule_ids: rules.map((r) => r.id) } });
     } catch (err) {
       console.error("[api/policy] audit", err);
     }

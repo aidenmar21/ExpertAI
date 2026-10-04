@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { roleById } from "@understudy/brain/server";
 import ModeNav from "@/components/ModeNav";
 import CoverageInterview from "@/components/coverage/CoverageInterview";
-import { listJobIds, loadJob } from "@/lib/job";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 /** "retail cashier, returns desk" -> "retail cashiers"; no role -> "people in this job". */
 function rolePlural(name: string | undefined): string {
@@ -16,8 +16,8 @@ function rolePlural(name: string | undefined): string {
 export default async function CoveragePage({ searchParams }: PageProps<"/coverage">) {
   const { job = "returns-desk" } = await searchParams;
   const id = Array.isArray(job) ? job[0] : job;
-  if (!listJobIds().includes(id)) notFound();
-  const profile = loadJob(id).job;
+  if (!(await listJobIds()).includes(id)) notFound();
+  const profile = (await loadJob(id)).job;
   return (
     <div className="flex min-h-screen flex-col">
       <ModeNav jobId={id} mode="workmap" />

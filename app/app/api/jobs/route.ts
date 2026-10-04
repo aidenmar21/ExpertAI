@@ -1,9 +1,14 @@
 import type { CreateJobInput } from "@/lib/job";
-import { createJob, listJobSummaries } from "@/lib/job";
+import { createJob, listJobSummaries } from "@/lib/db/jobs";
+import { errorResponse, RepositoryError } from "@/lib/db/server";
 
 /** GET: every job in shared/jobs with its role and software names resolved from the knowledge index. */
 export async function GET() {
-  return Response.json({ jobs: listJobSummaries() });
+  try {
+    return Response.json({ jobs: await listJobSummaries() });
+  } catch (err) {
+    return errorResponse(err);
+  }
 }
 
 /** POST { name, role_id?, software_ids?, written_policy?, escalate_to?, category?, business_date? }: create shared/jobs/<id>.json. */
@@ -18,7 +23,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "expected { name, role_id?, software_ids?, written_policy? }" }, { status: 400 });
   }
   try {
-    const profile = createJob({
+    const profile = await createJob({
       name: body.name,
       role_id: typeof body.role_id === "string" ? body.role_id : null,
       software_ids: Array.isArray(body.software_ids) ? body.software_ids.filter((s): s is string => typeof s === "string") : undefined,
@@ -30,6 +35,7 @@ export async function POST(request: Request) {
     return Response.json({ id: profile.job.id, job: profile.job, screen: profile.screen }, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "error";
+    if (err instanceof RepositoryError && err.message !== "exists") return errorResponse(err);
     if (msg === "exists") return Response.json({ error: "a job with that name already exists" }, { status: 409 });
     if (msg === "invalid") return Response.json({ error: "name must contain letters or numbers" }, { status: 400 });
     console.error("[api/jobs]", err);

@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.2",
     "@tensorflow/tfjs": "^4.22.0",
     "@understudy/brain": "*",
     "@understudy/engine": "*",
