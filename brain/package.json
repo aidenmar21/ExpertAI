@@ -17,7 +17,7 @@
     "tsx": "^4.23.15"
   },
   "scripts": {
-    "test": "tsx test/loop.test.ts && tsx --test test/regression.test.ts && node test/browser-safe.mjs",
+    "test": "tsx test/loop.test.ts && tsx test/guide.test.ts && tsx --test test/regression.test.ts && node test/browser-safe.mjs",
     "test:model": "tsx test/model.test.ts"
   }
 }
