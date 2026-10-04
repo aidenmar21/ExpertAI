@@ -2,7 +2,7 @@
 // One append-only JSONL file per session at <repo>/data/audit/<session_id>.jsonl. Each entry is hash-chained to the
 // previous one, so an edited, removed, or reordered line breaks the chain and verifyAudit() reports where.
 // No raw frames and no PII ever go in: every string in a payload passes through redact() before it is written.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { redact } from "./index";
@@ -154,23 +154,46 @@ function lastEntry(sessionId: string): AuditEntry | null {
 }
 
 // ---------- Append ----------
+// Atomic mkdir serializes the entire read/hash/append operation across processes, not just calls
+// in one JS event loop. Never steal a lock: a slow writer must not lose ownership mid-append.
+function lockSession(file: string): () => void {
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + 5000;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      return () => rmdirSync(lock);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (Date.now() >= deadline) throw new Error(`Timed out acquiring audit lock: ${lock}`);
+      Atomics.wait(sleeper, 0, 0, 10);
+    }
+  }
+}
+
 /** Appends one entry (redacted, hash-chained) and returns it. One line per call via appendFileSync. */
 export function appendAudit(sessionId: string, input: AuditInput): AuditEntry {
   const sid = safeSessionId(sessionId);
   mkdirSync(auditDir(), { recursive: true });
-  const prev = lastEntry(sid);
-  const base: Omit<AuditEntry, "hash"> = {
-    seq: (prev?.seq ?? 0) + 1,
-    ts: new Date().toISOString(),
-    session_id: sid,
-    actor: AUDIT_ACTORS.includes(input.actor) ? input.actor : "system",
-    type: input.type,
-    payload: (sanitizePayload(input.payload ?? {}) as Record<string, unknown>) ?? {},
-    prev_hash: prev?.hash || "genesis",
-  };
-  const entry: AuditEntry = { ...base, hash: hashEntry(base) };
-  appendFileSync(fileFor(sid), JSON.stringify(entry) + "\n", { encoding: "utf8", flag: "a" });
-  return entry;
+  const release = lockSession(fileFor(sid));
+  try {
+    const prev = lastEntry(sid);
+    const base: Omit<AuditEntry, "hash"> = {
+      seq: (prev?.seq ?? 0) + 1,
+      ts: new Date().toISOString(),
+      session_id: sid,
+      actor: AUDIT_ACTORS.includes(input.actor) ? input.actor : "system",
+      type: input.type,
+      payload: (sanitizePayload(input.payload ?? {}) as Record<string, unknown>) ?? {},
+      prev_hash: prev?.hash || "genesis",
+    };
+    const entry: AuditEntry = { ...base, hash: hashEntry(base) };
+    appendFileSync(fileFor(sid), JSON.stringify(entry) + "\n", { encoding: "utf8", flag: "a" });
+    return entry;
+  } finally {
+    release();
+  }
 }
 
 /** Model-call ledger: which model, which prompt, how long, and whether the input was redacted. Never the prompt itself. */
@@ -196,6 +219,7 @@ export function verifyEntries(entries: AuditEntry[]): VerifyResult {
   let prev = "genesis";
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
+    if (!e || typeof e !== "object") return { ok: false, entries, broken_at: i + 1 };
     const seqOk = e.seq === i + 1;
     const linkOk = e.prev_hash === prev;
     let hashOk = false;
@@ -204,7 +228,7 @@ export function verifyEntries(entries: AuditEntry[]): VerifyResult {
       const base: Omit<AuditEntry, "hash"> = { seq: e.seq, ts: e.ts, session_id: e.session_id, actor: e.actor, type: e.type, payload: e.payload, prev_hash: e.prev_hash };
       hashOk = hashEntry(base) === e.hash;
     }
-    if (!seqOk || !linkOk || !hashOk) return { ok: false, entries, broken_at: e.seq ?? i + 1 };
+    if (!seqOk || !linkOk || !hashOk) return { ok: false, entries, broken_at: i + 1 };
     prev = e.hash;
   }
   return { ok: true, entries };

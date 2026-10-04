@@ -310,7 +310,8 @@ export async function buildWorkMap(input: BuildWorkMapInput): Promise<WorkMapWit
 
   // Baseline (industry standard) and written policy rules are not built from the transcript: they carry over as-is,
   // then each baseline rule is confirmed or overridden by the expert's own rules.
-  const carried = (prev?.rules ?? []).filter((x) => x.source === "baseline" || x.source === "policy");
+  // Also carried: company rules from the coverage interview (ids "cov-*"); they come from a spoken answer, not a screen event.
+  const carried = (prev?.rules ?? []).filter((x) => x.source === "baseline" || x.source === "policy" || x.id.startsWith("cov-"));
   const learned = [...kept, ...extractedNow.rules];
   const decisions = records.map((r) => {
     const e = events.find((x) => x.id === r.sources.event_ids[0]);
