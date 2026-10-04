@@ -13,8 +13,17 @@ export async function listJobs(): Promise<JobProfile[]> {
   dbError(error);
   return (data ?? []).map((r) => r.profile as JobProfile);
 }
-export async function listJobIds() { return (await listJobs()).map((p) => p.job.id); }
-export async function listJobSummaries() { return (await listJobs()).map(files.summarizeJob); }
+export async function listJobIds(): Promise<string[]> {
+  if (!supabaseConfigured()) return files.listJobIds();
+  const { db, orgId } = await tenant();
+  const { data, error } = await db.from("jobs").select("slug").eq("org_id", orgId).order("slug");
+  dbError(error);
+  return (data ?? []).map((r) => r.slug as string);
+}
+export async function listJobSummaries() {
+  if (!supabaseConfigured()) return files.listJobSummaries();
+  return (await listJobs()).map(files.summarizeJob);
+}
 export async function jobRow(slug: string) {
   const ctx = await tenant();
   const { data, error } = await ctx.db.from("jobs").select("id,profile").eq("org_id", ctx.orgId).eq("slug", slug).maybeSingle();
