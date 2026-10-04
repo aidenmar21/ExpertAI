@@ -1,13 +1,12 @@
 import { buildWorkMap } from "@/lib/db/brain";
 import { appendAudit, logModelCall } from "@/lib/db/audit";
-import type { Rule, ScreenEvent, TranscriptLine } from "@understudy/shared";
+import type { Rule, ScreenEvent, TranscriptLine, WorkMap } from "@understudy/shared";
 import { confirmWorkMap, sessionFromHeaders, type AuditType, type WorkMapWithRecords } from "@understudy/brain/server";
 import { listJobIds } from "@/lib/db/jobs";
 import { getMap, saveMap } from "@/lib/db/workMaps";
 import { supabaseConfigured } from "@/lib/db/config";
 import { requireRole, errorResponse } from "@/lib/db/server";
 import { saveSessionHistory } from "@/lib/db/sessions";
-import type { WorkMap } from "@understudy/shared";
 
 interface WorkMapRequest {
   job_id: string;
@@ -15,7 +14,6 @@ interface WorkMapRequest {
   events: ScreenEvent[];
   transcript: TranscriptLine[];
   previous?: WorkMapWithRecords;
-  version?: number;
   confirm?: boolean; // expert said yes to the teach-back
 }
 
@@ -62,16 +60,24 @@ export async function POST(request: Request) {
   const session = sessionFromHeaders(request.headers);
   const started = Date.now();
   try {
-    if (supabaseConfigured()) await requireRole(["owner", "manager", "expert"]);
-    const current = await getMap(body.job_id);
-    const expected = body.version ?? current.version;
     const { confirm, ...input } = body;
-    if (supabaseConfigured()) input.previous = current.map as WorkMapWithRecords ?? undefined;
+    let expected = 0;
+    if (supabaseConfigured()) {
+      // The server copy is the source of truth: build on it, then compare-and-swap against its version.
+      await requireRole(["owner", "manager", "expert"]);
+      const current = await getMap(body.job_id);
+      expected = current.version;
+      input.previous = (current.map as WorkMapWithRecords | null) ?? body.previous;
+    }
     const built = await buildWorkMap({ ...input, expert: input.expert || "Expert" });
     const map = confirm ? confirmWorkMap(built) : built;
-    await auditDiff(session, Date.now() - started, body.previous?.rules ?? [], map.rules, { expert: map.expert, confirm: !!confirm, confirmed_at: map.confirmed_at });
-    const version = await saveMap(body.job_id, map, expected);
-    await saveSessionHistory(session, body.job_id, body.events, body.transcript);
+    await auditDiff(session, Date.now() - started, input.previous?.rules ?? [], map.rules, { expert: map.expert, confirm: !!confirm, confirmed_at: map.confirmed_at });
+    const version = await saveMap(body.job_id, map, expected); // file mode: data/workmaps/<job>.json, as before
+    try {
+      await saveSessionHistory(session, body.job_id, body.events, body.transcript);
+    } catch (err) {
+      console.error("[api/workmap] session history", err);
+    }
     return Response.json(map, { headers: { "x-workmap-version": String(version) } });
   } catch (err) {
     if (supabaseConfigured()) return errorResponse(err);
@@ -80,7 +86,7 @@ export async function POST(request: Request) {
   }
 }
 
-/** GET keeps the original WorkMap shape; version is an HTTP header. */
+/** GET ?job=<id> -> the job's latest server Work Map (or null). Same WorkMap shape; the version is the x-workmap-version header. */
 export async function GET(request: Request) {
   try {
     const id = new URL(request.url).searchParams.get("job") ?? "";
@@ -89,7 +95,7 @@ export async function GET(request: Request) {
     return Response.json(map, { headers: { "x-workmap-version": String(version), "cache-control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }
-/** PUT saves local edits with compare-and-swap; never silently overwrites another expert. */
+/** PUT { job_id, map, version } saves client edits with compare-and-swap (409 on conflict); never silently overwrites another expert. */
 export async function PUT(request: Request) {
   let body: { job_id?: string; map?: WorkMap; version?: number };
   try { body = await request.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }

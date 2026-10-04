@@ -4,7 +4,6 @@ import { canonicalField, checkAction } from "@understudy/brain";
 import { sessionFromHeaders } from "@understudy/brain/server";
 import { listJobIds, loadJob } from "@/lib/db/jobs";
 import { getMap } from "@/lib/db/workMaps";
-import { supabaseConfigured } from "@/lib/db/config";
 
 interface CheckBody { job_id?: string; action?: string; record?: Record<string, Value>; map?: WorkMap }
 
@@ -25,7 +24,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "expected { job_id, action, record, map? }" }, { status: 400 });
   }
   // The caller's map wins; otherwise the job's latest map saved by /api/workmap (the extension has no browser copy).
-  const map = supabaseConfigured() ? (await getMap(id)).map : body.map && Array.isArray(body.map.rules) ? body.map : (await getMap(id)).map;
+  // With Supabase the server map is the caller org's (or the demo org's, when the extension calls without a cookie).
+  const map = body.map && Array.isArray(body.map.rules) ? body.map : (await getMap(id)).map;
   if (!map || !Array.isArray(map.rules)) return Response.json({ ok: true } satisfies CheckResult);
 
   const job = (await loadJob(id));

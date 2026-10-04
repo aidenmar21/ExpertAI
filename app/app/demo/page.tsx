@@ -1,15 +1,15 @@
 import Link from "next/link";
 import DemoReset from "@/components/DemoReset";
 import { PageChrome } from "@/components/JobsDashboard";
-import { listJobIds, loadJob } from "@/lib/job";
+import { listJobSummaries } from "@/lib/db/jobs";
 import { page } from "@/components/ui/styles";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Demo operator · ExpertAI" };
 
 /** Operator page for the live demo. Not linked from the main nav. */
-export default function DemoPage() {
-  const jobs = listJobIds().map((id) => ({ id, name: loadJob(id).job.name }));
+export default async function DemoPage() {
+  const jobs = (await listJobSummaries()).map(({ id, name }) => ({ id, name }));
   return (
     <div className="flex min-h-screen flex-col">
       <PageChrome>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authClient, dbError, serviceClient } from "@/lib/db/server";
-import { supabaseConfigured } from "@/lib/db/config";
+import { DEMO_ORG_ID, supabaseConfigured } from "@/lib/db/config";
 import { acceptInvite } from "@/lib/db/invites";
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -17,11 +17,20 @@ export async function GET(request: Request) {
     let orgId: string;
     if (invite) orgId = await acceptInvite(invite, user);
     else {
-      const { data, error: bootstrapError } = await serviceClient().rpc("bootstrap_org", { uid: user.id });
+      const db = serviceClient();
+      const { data, error: bootstrapError } = await db.rpc("bootstrap_org", { uid: user.id });
       dbError(bootstrapError);
-      orgId = data;
+      orgId = data as string;
+      // A brand-new org starts with copies of the demo jobs so every page has something to open.
+      const { count } = await db.from("jobs").select("id", { count: "exact", head: true }).eq("org_id", orgId);
+      if (!count && orgId !== DEMO_ORG_ID) {
+        const { data: demo } = await db.from("jobs").select("slug,profile,role_id,software_ids").eq("org_id", DEMO_ORG_ID);
+        if (demo?.length) await db.from("jobs").upsert(demo.map((j) => ({ ...j, org_id: orgId })), { onConflict: "org_id,slug", ignoreDuplicates: true });
+      }
     }
-    const response = NextResponse.redirect(new URL("/jobs", url));
+    const next = url.searchParams.get("next") ?? "";
+    const dest = next.startsWith("/") && !next.startsWith("//") ? next : "/jobs";
+    const response = NextResponse.redirect(new URL(dest, url));
     response.cookies.set("expertai-org", orgId, { httpOnly: true, sameSite: "lax", secure: url.protocol === "https:", path: "/" });
     response.headers.set("cache-control", "no-store");
     return response;

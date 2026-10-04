@@ -1,8 +1,8 @@
 import { buildWorkMap, seedWorkMap } from "@/lib/db/brain";
 import type { ScreenEvent, TranscriptLine } from "@understudy/shared";
-import { confirmWorkMap, seedWorkMap } from "@understudy/brain/server";
+import { confirmWorkMap } from "@understudy/brain/server";
 import { listJobIds } from "@/lib/db/jobs";
-import { getMap, saveMap } from "@/lib/db/workMaps";
+import { saveMap } from "@/lib/db/workMaps";
 import { requireRole, errorResponse } from "@/lib/db/server";
 import { supabaseConfigured } from "@/lib/db/config";
 
@@ -55,7 +55,6 @@ export async function POST(request: Request) {
   if (!script) return Response.json({ error: `no scripted session for ${jobId}` }, { status: 400 });
   try {
     if (supabaseConfigured()) await requireRole(["owner", "manager", "expert"]);
-    const current = await getMap(jobId);
     const built = await buildWorkMap({
       job_id: jobId,
       expert: SEEDED_EXPERT,
@@ -64,7 +63,7 @@ export async function POST(request: Request) {
       previous: await seedWorkMap(jobId, SEEDED_EXPERT),
     });
     const map = confirmWorkMap(built);
-    await saveMap(jobId, map, current.version); // the extension checks against this copy
+    await saveMap(jobId, map, "latest"); // the extension checks against this copy (versioned in Postgres)
     return Response.json(map);
   } catch (err) {
     if (supabaseConfigured()) return errorResponse(err);

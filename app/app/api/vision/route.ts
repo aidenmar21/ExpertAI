@@ -17,7 +17,8 @@ export async function POST(request: Request) {
   const started = Date.now();
   try {
     const result: VisionResponse = await analyzeFrame(body);
-    audit(session, Date.now() - started, result);
+    // Not awaited: the audit write (a database round trip when Supabase is on) must never slow a frame.
+    void audit(session, Date.now() - started, result);
     return Response.json(result);
   } catch (err) {
     // A failed frame should never break capture: report no events.
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
 }
 
 // Audit: one model_call per frame and one screen_event per detected event. Never the frame, never detail text.
-function audit(session: string, latency_ms: number, result: VisionResponse) {
+async function audit(session: string, latency_ms: number, result: VisionResponse) {
   try {
     await logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "vision-v1", latency_ms, redacted: true, purpose: "vision" });
     for (const e of result.events) {
