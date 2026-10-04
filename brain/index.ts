@@ -86,13 +86,16 @@ export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions 
   const sets = opts.job?.screen.actions.find((x) => x.key === a.action)?.sets ?? {};
   a = { ...a, record: deriveFields(opts.job, a.record) };
   const after: Rec = { ...a.record, ...sets };
-  // Company rules first (anything confirmed, including baseline rules the expert matched). If no company rule
-  // covers the case at all, an unconfirmed baseline rule may speak as "the industry standard".
-  const company = map.rules.filter((r) => r.confirmed || opts.includeUnconfirmed);
+  // Superseded baselines (overridden, or matched by a company rule) never enforce on their own.
+  const active = map.rules.filter((r) => !r.overridden_by && !r.confirmed_by);
+  // Company rules first. Preview (includeUnconfirmed) also counts unconfirmed company rules. Baseline rules only
+  // speak when no company rule covers the case: as the industry-standard fallback, or when previewing/probing
+  // (engine's question picker checks a map of baseline rules with includeUnconfirmed and baselineFallback off).
+  const company = active.filter((r) => r.source !== "baseline" || r.confirmed).filter((r) => r.confirmed || opts.includeUnconfirmed);
   const covered = company.some((r) => r.when.every((c) => evalCondition(c, a.record)));
-  const fallback = covered || opts.baselineFallback === false
+  const fallback = covered || (opts.baselineFallback === false && !opts.includeUnconfirmed)
     ? []
-    : map.rules.filter((r) => r.source === "baseline" && !r.confirmed && !r.overridden_by);
+    : active.filter((r) => r.source === "baseline" && !r.confirmed);
   for (const rule of [...company, ...fallback]) {
     const standard = rule.source === "baseline" && !rule.confirmed;
     if (!rule.when.every((c) => evalCondition(c, a.record))) continue;
@@ -123,19 +126,33 @@ export function checkAction(a: ProposedAction, map: WorkMap, opts: CheckOptions 
  * Same conditions, different outcome: the baseline rule is overridden by the expert's rule.
  */
 export function reconcileBaseline(carried: Rule[], learned: Rule[]): Rule[] {
-  const fieldsOf = (r: Rule) => new Set(r.when.map((c) => c.field));
-  const sameFields = (x: Rule, y: Rule) => {
-    const a = fieldsOf(x), b = fieldsOf(y);
-    return a.size > 0 && a.size === b.size && [...a].every((f) => b.has(f));
+  const valueKey = (v: Value | undefined) => v == null ? null : String(v).trim().toLowerCase();
+  const conditionKey = (c: Condition) => JSON.stringify([c.field, c.op,
+    c.op === "missing" || c.op === "present" ? null
+      : Array.isArray(c.value) ? [...new Set(c.value.map(valueKey))].sort() : valueKey(c.value),
+  ]);
+  const conditions = (r: Rule) => [...new Set(r.when.map(conditionKey))].sort();
+  const sameConditions = (x: Rule, y: Rule) => JSON.stringify(conditions(x)) === JSON.stringify(conditions(y));
+  const direction = (op: Condition["op"]) => ["gt", "gte"].includes(op) ? "above" : ["lt", "lte"].includes(op) ? "below" : null;
+  // A company can change a numeric limit without changing who approves it. That replaces the
+  // baseline limit; disjoint categorical cases (Opened vs New) do not replace each other.
+  const changedLimit = (x: Rule, y: Rule) => {
+    const matches = (a: Condition, b: Condition) => conditionKey(a) === conditionKey(b)
+      || (a.field === b.field && direction(a.op) !== null && direction(a.op) === direction(b.op)
+        && typeof a.value === "number" && typeof b.value === "number");
+    return x.when.length === y.when.length && x.when.every(a => y.when.some(b => matches(a, b)))
+      && y.when.every(b => x.when.some(a => matches(a, b)));
   };
   // Same intent unless the two rules actually conflict: a required value that differs, a value one requires and the
   // other forbids, or different people to escalate to. Wording and extra detail ("at the lowest price") don't count.
   const sameOutcome = (x: Rule, y: Rule) => !conflicts(x.then, y.then) && overlaps(x.then, y.then);
   return carried.map((b) => {
     if (b.source !== "baseline") return b;
-    const match = learned.find((l) => sameFields(b, l));
+    const relatedOutcome = (l: Rule) => conflicts(b.then, l.then) || overlaps(b.then, l.then);
+    const match = learned.find((l) => sameConditions(b, l) && relatedOutcome(l))
+      ?? learned.find((l) => changedLimit(b, l) && relatedOutcome(l));
     if (!match) return b;
-    if (sameOutcome(b, match) || (!!b.then.escalate_to && b.then.escalate_to === match.then.escalate_to)) {
+    if (sameConditions(b, match) && sameOutcome(b, match)) {
       return {
         ...b, confirmed: true, overridden_by: undefined, override_quote: undefined, confirmed_by: match.id,
         reason_quote: match.reason_quote, clip_id: match.clip_id, screen_moment: match.screen_moment,
@@ -159,11 +176,11 @@ export function overrideByDecisions(
     for (const d of decisions) {
       if (d.why === null || !d.event.field) continue;
       const rec: Rec = { ...(valuesFor(d.record) ?? {}), [d.event.field]: d.event.to ?? null };
-      if (b.when.length === 0 || !b.when.every((c) => evalCondition(c, rec))) continue;
+      if (!b.when.every((c) => evalCondition(c, rec))) continue;
       const must = b.then.must?.[d.event.field];
       const mustNot = b.then.must_not?.[d.event.field];
-      const broke = (must !== undefined && String(must).toLowerCase() !== String(d.event.to ?? "").toLowerCase())
-        || (mustNot !== undefined && String(mustNot).toLowerCase() === String(d.event.to ?? "").toLowerCase());
+      const broke = (must !== undefined && !same(must, d.event.to))
+        || (mustNot !== undefined && same(mustNot, d.event.to));
       if (broke) return { ...b, overridden_by: d.id, override_quote: d.quotes[0] ?? d.why ?? undefined };
     }
     return b;
