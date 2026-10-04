@@ -1,7 +1,7 @@
 import type { StuckSignals, Value } from "@understudy/shared";
 import { nextStepFor } from "@understudy/brain/server";
 import { detectStuck } from "@understudy/engine";
-import { listJobIds, loadJob } from "@/lib/job";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 interface GuideRequest {
   job_id?: string;
@@ -23,8 +23,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
-  const job = loadJob(id);
+  if (!(await listJobIds()).includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
+  const job = (await loadJob(id));
   const record = isRecord(body.record) ? body.record : {};
   const action = typeof body.action === "string" && body.action ? body.action : undefined;
 

@@ -1,8 +1,9 @@
+import { appendAudit } from "@/lib/db/audit";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { appendAudit, briefingFor, knowledgeForJob, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
+import { briefingFor, knowledgeForJob, sessionFromHeaders } from "@understudy/brain/server";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 const KB_FILE = path.join(process.cwd(), "..", "data", "kb.json");
 
@@ -11,8 +12,8 @@ interface KbState { [jobId: string]: { hash: string; doc_id: string; name: strin
 /** GET ?job=<id>: the role briefing (≤1500 words) and what it was built from. */
 export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("job") ?? "";
-  if (!listJobIds().includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
-  const job = loadJob(id);
+  if (!(await listJobIds()).includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
+  const job = (await loadJob(id));
   const { role, software } = knowledgeForJob(job);
   return Response.json({ briefing: briefingFor(job), role, software, words: briefingFor(job).split(/\s+/).length });
 }
@@ -29,8 +30,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
-  const job = loadJob(id);
+  if (!(await listJobIds()).includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
+  const job = (await loadJob(id));
   const briefing = briefingFor(job);
   const { role, software } = knowledgeForJob(job);
   let kb: { doc_id: string; synced: boolean; error?: string } | null = null;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
     kb = await syncKnowledgeBase(id, `ExpertAI briefing: ${job.job.name}`, briefing).catch((e: Error) => ({ doc_id: "", synced: false, error: e.message }));
   }
   try {
-    appendAudit(sessionFromHeaders(request.headers), {
+    await appendAudit(sessionFromHeaders(request.headers), {
       actor: "system",
       type: "session_start",
       payload: { job_id: id, job_name: job.job.name, briefing_words: briefing ? briefing.split(/\s+/).length : 0, kb_synced: kb?.synced ?? false, role_id: job.job.role_id ?? null },

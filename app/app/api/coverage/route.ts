@@ -1,8 +1,10 @@
 import type { Rule, WorkMap } from "@understudy/shared";
 import { redact } from "@understudy/brain";
-import { logModelCall, parsePolicy, piiValues, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
-import { saveServerMap } from "@/lib/serverMaps";
+import { parsePolicy, piiValues, sessionFromHeaders } from "@understudy/brain/server";
+import { logModelCall } from "@/lib/db/audit";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
+import { saveMap } from "@/lib/db/workMaps";
+import { errorResponse } from "@/lib/db/server";
 
 /**
  * Coverage interview: the expert says how one industry-standard (baseline) rule works at their company.
@@ -11,7 +13,8 @@ import { saveServerMap } from "@/lib/serverMaps";
  *   verdict: same | different | not_applicable | unclear (classified by the LLM from the expert's words only).
  *   quote:   the expert's exact words, redacted.
  *   rule:    for "different", a company rule parsed from the expert's words (source "debrief", confirmed).
- * POST { job_id, save_map } -> { ok }: writes the updated Work Map to the server copy.
+ * POST { job_id, save_map } -> { ok }: writes the updated Work Map through the repository (data/workmaps file, or
+ *   Postgres with a new version when Supabase is on; last write wins, an identical map is a no-op).
  *
  * Nothing is invented: a company rule only exists when the expert's own sentence grounds it.
  */
@@ -91,18 +94,22 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
+  if (!(await listJobIds()).includes(id)) return Response.json({ error: "unknown job" }, { status: 404 });
 
   if (body.save_map !== undefined) {
     if (!isMap(body.save_map, id)) return Response.json({ error: "expected { job_id, save_map: WorkMap }" }, { status: 400 });
-    saveServerMap(id, body.save_map);
+    try {
+      await saveMap(id, body.save_map, "latest");
+    } catch (err) {
+      return errorResponse(err);
+    }
     return Response.json({ ok: true });
   }
 
   if (!isRule(body.rule) || typeof body.answer !== "string" || !body.answer.trim()) {
     return Response.json({ error: "expected { job_id, rule, answer }" }, { status: 400 });
   }
-  const job = loadJob(id);
+  const job = await loadJob(id);
   const baseline = body.rule;
   const quote = redact(body.answer.trim().replace(/\s+/g, " "), piiValues(job));
   const session = sessionFromHeaders(request.headers);
@@ -128,7 +135,7 @@ export async function POST(request: Request) {
     }
   }
   try {
-    logModelCall(session, { model: process.env.LLM_MODEL, prompt_version: "coverage-v1", latency_ms: Date.now() - started, redacted: true, purpose: "coverage" });
+    await logModelCall(session, { model: process.env.LLM_MODEL, prompt_version: "coverage-v1", latency_ms: Date.now() - started, redacted: true, purpose: "coverage" });
   } catch (err) {
     console.error("[api/coverage] audit", err);
   }

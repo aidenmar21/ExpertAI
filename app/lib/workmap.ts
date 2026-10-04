@@ -3,11 +3,86 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { OpenGap, Rule, ScreenEvent, TranscriptLine, WorkMap } from "@understudy/shared";
 import { auditHeaders } from "@/lib/audit";
+import { persistenceEnabled } from "@/lib/db/browser";
 
 const KEY = (jobId: string) => `understudy:workmap:${jobId}`;
 const subs = new Set<() => void>();
 const cache = new Map<string, WorkMap | null>();
 const seeding = new Set<string>();
+
+// ---------- Server sync (only when Supabase is configured; otherwise localStorage alone, as before) ----------
+// The server copy (GET/PUT /api/workmap) is the source of truth; localStorage is a cache. Each job's server version
+// is tracked so saves are compare-and-swap: a 409 means another expert saved first, and the latest copy is reloaded.
+const VERSION_HEADER = "x-workmap-version";
+const versions = new Map<string, number>();
+const pulled = new Set<string>();
+const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function store(jobId: string, map: WorkMap | null) {
+  cache.set(jobId, map);
+  try {
+    if (map) localStorage.setItem(KEY(jobId), JSON.stringify(map));
+    else localStorage.removeItem(KEY(jobId));
+  } catch {
+    /* storage unavailable */
+  }
+  subs.forEach((s) => s());
+}
+
+function noteVersion(jobId: string, res: Response) {
+  const v = Number(res.headers.get(VERSION_HEADER));
+  if (Number.isInteger(v) && v > 0) versions.set(jobId, v);
+}
+
+/** Load the job's server map once per page load. Returns it (null when there is none or persistence is off). */
+async function pull(jobId: string): Promise<WorkMap | null> {
+  if (!(await persistenceEnabled())) return null;
+  try {
+    const res = await fetch(`/api/workmap?job=${encodeURIComponent(jobId)}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    noteVersion(jobId, res);
+    const map = (await res.json()) as WorkMap | null;
+    if (map && Array.isArray(map.rules)) {
+      store(jobId, map);
+      return map;
+    }
+  } catch {
+    /* offline: keep the cache */
+  }
+  return null;
+}
+
+function syncOnce(jobId: string) {
+  if (pulled.has(jobId)) return;
+  pulled.add(jobId);
+  void pull(jobId);
+}
+
+/** Debounced save of a local edit (policy rules, removed rules, new gaps, coverage answers). */
+function schedulePush(jobId: string) {
+  clearTimeout(pushTimers.get(jobId));
+  pushTimers.set(jobId, setTimeout(() => void push(jobId), 400));
+}
+
+async function push(jobId: string) {
+  if (!(await persistenceEnabled())) return;
+  const map = cache.get(jobId);
+  if (!map) return;
+  try {
+    const res = await fetch("/api/workmap", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...auditHeaders() },
+      body: JSON.stringify({ job_id: jobId, map, version: versions.get(jobId) ?? 0 }),
+    });
+    if (res.ok) noteVersion(jobId, res);
+    else if (res.status === 409) {
+      console.warn("[workmap] another expert saved this Work Map first; loading the latest copy");
+      await pull(jobId);
+    }
+  } catch {
+    /* offline: the next edit retries */
+  }
+}
 
 /** The latest Work Map per job, kept in memory and in localStorage so tutor mode and /workmap can read it. */
 export const workMaps = {
@@ -24,15 +99,10 @@ export const workMaps = {
     }
     return cache.get(jobId) ?? null;
   },
+  /** A local edit: cached here and, when persistence is on, saved to the server (clearing never deletes the server copy). */
   set(jobId: string, map: WorkMap | null) {
-    cache.set(jobId, map);
-    try {
-      if (map) localStorage.setItem(KEY(jobId), JSON.stringify(map));
-      else localStorage.removeItem(KEY(jobId));
-    } catch {
-      /* storage unavailable */
-    }
-    subs.forEach((s) => s());
+    store(jobId, map);
+    if (map) schedulePush(jobId);
   },
   update(jobId: string, fn: (m: WorkMap) => WorkMap) {
     const cur = workMaps.get(jobId);
@@ -70,6 +140,9 @@ export async function seedWorkMap(jobId: string, expert: string): Promise<WorkMa
   if (workMaps.get(jobId) || seeding.has(jobId)) return workMaps.get(jobId);
   seeding.add(jobId);
   try {
+    pulled.add(jobId);
+    const server = await pull(jobId);
+    if (server) return server;
     const res = await fetch(`/api/baseline?job=${encodeURIComponent(jobId)}&expert=${encodeURIComponent(expert)}`);
     if (!res.ok) return null;
     const map = (await res.json()) as WorkMap;
@@ -89,6 +162,7 @@ export function useWorkMap(jobId: string, expert = "Expert"): WorkMap | null {
   const map = useSyncExternalStore(workMaps.subscribe, () => workMaps.get(jobId), noMap);
   useEffect(() => {
     if (!map) void seedWorkMap(jobId, expert);
+    else syncOnce(jobId);
   }, [map, jobId, expert]);
   return map;
 }
@@ -121,7 +195,8 @@ export async function rebuildWorkMap(input: {
     }),
   });
   if (!res.ok) return null;
+  noteVersion(input.jobId, res);
   const map = (await res.json()) as WorkMap;
-  workMaps.set(input.jobId, map);
+  store(input.jobId, map); // already saved by the server
   return map;
 }

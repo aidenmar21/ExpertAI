@@ -1,7 +1,8 @@
+import { appendAudit } from "@/lib/db/audit";
 import type { QuestionPick, ScreenEvent, ScreenState, TranscriptLine, WorkMap } from "@understudy/shared";
 import { pickQuestion } from "@understudy/engine/server";
-import { appendAudit, baselineRulesFor, roleById, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
+import { baselineRulesFor, roleById, sessionFromHeaders } from "@understudy/brain/server";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 interface QuestionRequest {
   job_id: string;
@@ -19,11 +20,11 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  if (!listJobIds().includes(body?.job_id) || !Array.isArray(body.recent) || !body.map) {
+  if (!(await listJobIds()).includes(body?.job_id) || !Array.isArray(body.recent) || !body.map) {
     return Response.json({ error: "expected { job_id, recent, transcript, map }" }, { status: 400 });
   }
   try {
-    const job = loadJob(body.job_id);
+    const job = (await loadJob(body.job_id));
     const result: QuestionPick | null = await pickQuestion(body.recent, body.map, job.job.written_policy, body.transcript ?? [], {
       baseline: baselineRulesFor(job.job.role_id),
       screen: body.screen ?? null,
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     });
     if (result) {
       try {
-        appendAudit(sessionFromHeaders(request.headers), {
+        await appendAudit(sessionFromHeaders(request.headers), {
           actor: "expertai",
           type: "question_asked",
           payload: { question: result.question, kind: result.kind ?? (result.is_guardrail ? "guardrail" : "unexplained"), reason: result.reason ?? null, rule_id: result.rule_id ?? null, about_event_id: result.about_event_id },
