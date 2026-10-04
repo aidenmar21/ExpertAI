@@ -14,10 +14,13 @@ export interface FormatOptions {
 }
 
 /** Every bracket tag we send. Used to recognise our own messages if the SDK echoes them back. */
-export const CONTEXT_TAGS = ["[SCREEN]", "[ASK NOW]", "[DEBRIEF]", "[GUARDRAIL]", "[STUCK]", "[OFF RECORD]", "[ON RECORD]", "[INPUT]", "[GUIDE]"];
+export const CONTEXT_TAGS = ["[SCREEN]", "[ASK NOW]", "[DEBRIEF]", "[GUARDRAIL]", "[STUCK]", "[OFF RECORD]", "[ON RECORD]", "[INPUT]", "[GUIDE]", "[GUIDE STEP]"];
 
 export function deliveryFor(m: AgentContextMessage): Delivery {
-  return m.kind === "screen_event" || m.kind === "user_input" ? "context" : "turn";
+  if (m.kind === "screen_event" || m.kind === "user_input" || m.kind === "guide") return "context";
+  // The tutor speaks when a step is shown, when they get it wrong, and at the end; the rest is background.
+  if (m.kind === "guide_progress") return ["showing", "wrong", "finished"].includes(m.progress.event) ? "turn" : "context";
+  return "turn";
 }
 
 function show(v: Value | undefined): string {
@@ -99,10 +102,32 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
       return `[INPUT] ${oneLine(m.text)}`;
 
     case "guide": {
-      const lines = ["[GUIDE] A mouse is now showing these steps on their screen, in order:"];
+      const lines = ["[GUIDE] Guide me started. A mouse will show these steps on their screen, one at a time, and wait for them to do each:"];
       m.steps.forEach((s, i) => lines.push(`${i + 1}. ${oneLine(s)}`));
-      lines.push("Talk them through it as it plays: one short sentence per step. Then say \"Your turn.\"");
+      lines.push("You will get a [GUIDE STEP] line as each step happens. Stay quiet until then.");
       return lines.join("\n");
+    }
+
+    case "guide_progress": {
+      const p = m.progress;
+      const head = `[GUIDE STEP ${p.step}/${p.total}]`;
+      const what = [oneLine(p.say), p.value ? `Value: ${oneLine(p.value)}.` : "", p.why ? sentence(`Why: ${oneLine(p.why)}`) : ""].filter(Boolean).join(" ");
+      switch (p.event) {
+        case "showing":
+          return `${head} Showing on screen now: ${what} Explain this step and why in one short sentence.`;
+        case "your_turn":
+          return `${head} Waiting for them to do it: ${oneLine(p.say)}`;
+        case "step_done":
+          return `${head} Done correctly: ${oneLine(p.say)}`;
+        case "wrong":
+          return `${head} They entered ${p.typed ? `"${oneLine(p.typed)}"` : "something else"}${p.value ? ` but it should be "${oneLine(p.value)}"` : ""}${p.target ? ` in ${p.target.replace(/\.$/, "")}` : ""}. Gently point out the difference in one sentence.`;
+        case "skipped":
+          return `${head} They skipped: ${oneLine(p.say)}`;
+        case "finished":
+          return `${head} Guide finished: they did every step. Say well done in a few words and one line on what the case taught.`;
+        case "stopped":
+          return `${head} They stopped the guide.`;
+      }
     }
   }
 }

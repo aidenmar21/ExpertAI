@@ -9,7 +9,7 @@ import { detectStuck, startCapture, stuckScore } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
 import FakeApp from "@/components/FakeApp";
 import GuideCursor from "@/components/GuideCursor";
-import Walkthrough from "@/components/Walkthrough";
+import Walkthrough, { type WalkEvent } from "@/components/Walkthrough";
 import { GuideBar, GuideMeButton, barBtn } from "@/components/GuideBar";
 import { expertDemos } from "@/lib/keytrace";
 import { EventRow, isPermissionDenied } from "@/components/ApprenticePanel";
@@ -108,6 +108,41 @@ function Tutor({ profile }: { profile: ClientJob }) {
     }
   }
 
+  // Guide me reports each moment to the tutor agent, so it can see what is being guided and explain it.
+  const [guideNow, setGuideNow] = useState<string | null>(null);
+  const onGuideEvent = useCallback(
+    (e: WalkEvent) => {
+      if (!walk) return;
+      const field = e.step.target.kind === "field" ? profile.screen.fields.find((f) => f.key === e.step.target.key) : undefined;
+      const action = e.step.target.kind === "action" ? profile.screen.actions.find((a) => a.key === e.step.target.key) : undefined;
+      const value = e.step.value != null && e.step.value !== "" ? String(e.step.value) : undefined;
+      agent.sendContext({
+        kind: "guide_progress",
+        progress: {
+          event: e.event,
+          step: e.index + 1,
+          total: walk.length,
+          say: e.step.say,
+          target: field?.label ?? action?.label,
+          ...(value ? { value } : {}),
+          ...(e.step.why ? { why: e.step.why } : {}),
+          // What they typed goes to the tutor, except in fields marked PII (names, card numbers).
+          ...(e.event === "wrong" ? { typed: field?.pii ? undefined : e.typed } : {}),
+        },
+      });
+      const n = `Step ${e.index + 1} of ${walk.length}`;
+      setGuideNow(
+        e.event === "showing" ? `${n} · showing: ${e.step.say}`
+        : e.event === "your_turn" ? `${n} · your turn: ${e.step.say}`
+        : e.event === "wrong" ? `${n} · not quite yet. Check it against the slip.`
+        : e.event === "finished" ? "Done! You did every step."
+        : null,
+      );
+      if (e.event === "finished" || e.event === "stopped") logAudit("guide_me_end", { how: e.event, step: e.index + 1, steps: walk.length }, "new_hire");
+    },
+    [walk, profile, agent],
+  );
+
   const confirmedRules = map?.rules.filter((r) => r.confirmed).length ?? 0;
   const standardRules = map?.rules.filter((r) => r.source === "baseline" && !r.confirmed && !r.overridden_by).length ?? 0;
 
@@ -165,7 +200,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
           title="Learn this case"
           status={
             walk
-              ? "Follow the mouse. It shows each step, then waits while you do it."
+              ? (guideNow ?? "Follow the mouse. It shows each step, then waits while you do it.")
               : step
                 ? <>Next: <span className="font-medium text-ink">{step.say}</span> Stuck? Press Guide me or ask the tutor.</>
                 : "All done here. Pick the next case from the queue."
@@ -192,8 +227,10 @@ function Tutor({ profile }: { profile: ClientJob }) {
                     plan={walk}
                     expert={expert}
                     interactive
+                    onEvent={onGuideEvent}
                     onDone={() => {
                       setWalk(null);
+                      setGuideNow(null);
                       setShowMe(true);
                     }}
                   />
@@ -512,6 +549,8 @@ function TutorPanel({
           </section>
         )}
 
+        <GuideFeed outbox={agent.outbox} connected={agent.status === "connected"} />
+
         {agent.newCases.length > 0 && (
           <section className="pb-6" aria-label="New cases for the expert">
             <p className={`${eyebrow} pb-3`}>New cases for the expert</p>
@@ -711,3 +750,22 @@ const formatT = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
+
+/** What Guide me told the tutor agent, newest first: proof the tutor can see what is being guided. */
+function GuideFeed({ outbox, connected }: { outbox: ApprenticeAgent["outbox"]; connected: boolean }) {
+  const lines = outbox.filter((o) => o.text.startsWith("[GUIDE")).slice(-6).reverse();
+  if (!lines.length) return null;
+  return (
+    <section className="pb-6" aria-label="What the tutor sees from the guide">
+      <p className={`${eyebrow} pb-2`}>Tutor is following the guide {connected ? "· live" : "· start the shift to have it explain"}</p>
+      <ol className="space-y-1.5">
+        {lines.map((o) => (
+          <li key={o.id} className="rounded-md border border-line bg-surface-subtle px-3 py-2 text-[13px] leading-5 text-ink">
+            {o.text.split("\n")[0].replace(/ (Explain this step|Gently point out|Say well done|Stay quiet|You will get).*$/, "")}
+            <span className="ml-2 text-note text-ink-tertiary">{o.delivery === "turn" ? "tutor explains" : "background"} · {o.outcome}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}

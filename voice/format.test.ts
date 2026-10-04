@@ -57,9 +57,22 @@ test("only screen events are silent context", () => {
 test("keyboard and mouse input is silent context; the guide makes the agent speak", () => {
   assert.equal(formatContext({ kind: "user_input", text: "Typed \"R-88101\" in Receipt no." }), '[INPUT] Typed "R-88101" in Receipt no.');
   assert.equal(deliveryFor({ kind: "user_input", text: "x" }), "context");
-  assert.equal(deliveryFor({ kind: "guide", steps: ["a"] }), "turn");
+  assert.equal(deliveryFor({ kind: "guide", steps: ["a"] }), "context");
   assert.match(formatContext({ kind: "guide", steps: ["Enter the receipt no.", "Click Refund."] }), /^\[GUIDE\][\s\S]*1\. Enter the receipt no\.\n2\. Click Refund\./);
   assert.deepEqual(holdOutgoing({ kind: "user_input", text: "x" }, { offRecord: true, debrief: "idle" })?.outcome, "held");
+});
+
+test("guide progress: the tutor explains shown steps and mistakes, the rest is background", () => {
+  const p = { step: 2, total: 8, say: "Enter the price.", target: "Price", value: "142", why: "It's on the slip." };
+  const showing = { kind: "guide_progress" as const, progress: { ...p, event: "showing" as const } };
+  assert.equal(formatContext(showing), "[GUIDE STEP 2/8] Showing on screen now: Enter the price. Value: 142. Why: It's on the slip. Explain this step and why in one short sentence.");
+  assert.equal(deliveryFor(showing), "turn");
+  const wrong = { kind: "guide_progress" as const, progress: { ...p, event: "wrong" as const, typed: "124" } };
+  assert.match(formatContext(wrong), /They entered "124" but it should be "142" in Price/);
+  assert.equal(deliveryFor(wrong), "turn");
+  for (const event of ["your_turn", "step_done", "skipped", "stopped"] as const)
+    assert.equal(deliveryFor({ kind: "guide_progress", progress: { ...p, event } }), "context", event);
+  assert.equal(deliveryFor({ kind: "guide_progress", progress: { ...p, event: "finished" } }), "turn");
 });
 
 test("ask now, stuck, off record", () => {

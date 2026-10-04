@@ -132,7 +132,20 @@ export type AgentContextMessage =
   | { kind: "stuck"; hint: string }
   | { kind: "off_record"; on: boolean }
   | { kind: "user_input"; text: string }      // what the person did in the app: keys, clicks, mouse (silent context)
-  | { kind: "guide"; steps: string[] };       // tutor: the on-screen walkthrough just started; narrate it
+  | { kind: "guide"; steps: string[] }        // tutor: the on-screen walkthrough just started (the plan)
+  | { kind: "guide_progress"; progress: GuideProgress }; // tutor: what the walkthrough is doing right now
+
+/** One moment of the on-screen walkthrough, so the tutor can explain what it is showing. */
+export interface GuideProgress {
+  event: "showing" | "your_turn" | "step_done" | "wrong" | "skipped" | "finished" | "stopped";
+  step: number;                 // 1-based
+  total: number;
+  say: string;                  // the step, e.g. "Enter the price."
+  target?: string;              // field or button label, e.g. "Price"
+  value?: string;               // what to type or choose, when known
+  why?: string;                 // the rule or the expert's habit behind it
+  typed?: string;               // on "wrong": what they entered (omitted for PII fields)
+}
 // voice: sendContext(m: AgentContextMessage): void   (formats as text, e.g. "[SCREEN] field_changed refund_method Card -> Cash on R-88104")
 
 // ---------- Job profile (shared/jobs/*.json) ----------

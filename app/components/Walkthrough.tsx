@@ -7,6 +7,14 @@ import { KeyCaps } from "@/components/KeyCast";
 import { Puddle } from "@/components/MouseTrail";
 
 type Box = { x: number; y: number; w: number; h: number };
+
+/** What the guide is doing, reported as it happens (the tutor agent is told, so it can explain). */
+export interface WalkEvent {
+  event: "showing" | "your_turn" | "step_done" | "wrong" | "skipped" | "finished" | "stopped";
+  index: number;             // 0-based step
+  step: GuideStep;
+  typed?: string;            // on "wrong": what is in the box
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Bubble {
@@ -43,11 +51,13 @@ export default function Walkthrough({
   expert = "The expert",
   interactive = false,
   onDone,
+  onEvent,
 }: {
   plan: GuideStep[];
   expert?: string;
   interactive?: boolean;
   onDone: () => void;
+  onEvent?: (e: WalkEvent) => void;
 }) {
   const self = useRef<HTMLDivElement>(null);
   const [scope, animate] = useAnimate<HTMLDivElement>();
@@ -59,15 +69,21 @@ export default function Walkthrough({
   const [finished, setFinished] = useState(false);
   const skip = useRef<(() => void) | null>(null);
   const done = useRef(onDone);
+  const report = useRef(onEvent);
   useEffect(() => {
     done.current = onDone;
-  }, [onDone]);
+    report.current = onEvent;
+  }, [onDone, onEvent]);
 
   useEffect(() => {
     const root = self.current?.closest("[data-guide-root]") as HTMLElement | null;
     const cursor = scope.current;
     if (!root || !cursor || !plan.length) return;
     let stopped = false;
+    let current = -1; // last step shown; -1 until the guide really starts
+    let over = false;
+    const emit = (event: WalkEvent["event"], index: number, typed?: string) =>
+      report.current?.({ event, index, step: plan[index], ...(typed !== undefined ? { typed } : {}) });
     const o = () => root.getBoundingClientRect();
     const elOf = (key: string) => root.querySelector(`[data-guide="${key}"]`) as HTMLElement | null;
     const boxOf = (el: HTMLElement): Box => {
@@ -75,12 +91,18 @@ export default function Walkthrough({
       return { x: r.left - b.left, y: r.top - b.top, w: r.width, h: r.height };
     };
 
-    /** Resolves once the person has done this step for real (or skipped it). */
-    const yourTurn = (step: GuideStep, el: HTMLElement, base: Omit<Bubble, "n" | "yours" | "wrong">) =>
-      new Promise<void>((resolve) => {
+    /** Resolves once the person has done this step for real, or skipped it. */
+    const yourTurn = (step: GuideStep, el: HTMLElement, base: Omit<Bubble, "n" | "yours" | "wrong">, index: number) =>
+      new Promise<"done" | "skipped">((resolveWith) => {
+        let skipped = false;
+        const resolve = () => resolveWith(skipped ? "skipped" : "done");
         let finish = () => {};
         const end = () => finish();
-        skip.current = end;
+        skip.current = () => {
+          skipped = true;
+          end();
+        };
+        emit("your_turn", index);
         if (step.target.kind === "action") {
           // Pressing the button is the step (even if a rule then pauses it: the tutor takes over).
           const press = () => end();
@@ -102,6 +124,7 @@ export default function Walkthrough({
         const start = control.value;
         const want = step.value != null ? String(step.value) : null;
         const typedKeys = (base.keys ?? []).filter((k) => k.length === 1).join("");
+        let wasWrong = false;
         const tick = () => {
           if (stopped) return finish();
           const have = control.value;
@@ -114,6 +137,9 @@ export default function Walkthrough({
           if (typedKeys && base.keys.length === typedKeys.length) while (n < typed.length && n < typedKeys.length && typed[n].toLowerCase() === typedKeys[n].toLowerCase()) n++;
           const wrong = !ok && want != null && have !== start && (control.tagName === "SELECT" || (n < typed.length) || have.length >= want.length);
           setBubble({ ...base, n, yours: true, wrong });
+          // Tell the tutor once each time they go wrong (not on every keystroke).
+          if (wrong && !wasWrong) emit("wrong", index, have);
+          wasWrong = wrong;
           if (ok) finish();
         };
         const id = setInterval(tick, 150);
@@ -129,9 +155,12 @@ export default function Walkthrough({
       const start = o();
       let at = { x: start.width - 60, y: start.height - 40 };
       await animate(cursor, { x: at.x, y: at.y, opacity: 1 }, { duration: 0 });
+      if (stopped) return;
       for (let k = 0; k < plan.length && !stopped; k++) {
         const step = plan[k];
         setI(k);
+        current = k;
+        emit("showing", k);
         setBubble(null);
         const el = elOf(`${step.target.kind}:${step.target.key}`);
         if (!el) continue;
@@ -191,13 +220,16 @@ export default function Walkthrough({
           // Step aside so the field stays readable, then wait for the real thing.
           await animate(cursor, { x: box.x + box.w - 8, y: box.y + box.h - 6 }, { duration: reduce ? 0 : 0.35 });
           at = { x: box.x + box.w - 8, y: box.y + box.h - 6 };
-          await yourTurn(step, el, base);
+          const how = await yourTurn(step, el, base, k);
           if (stopped) return;
+          emit(how === "skipped" ? "skipped" : "step_done", k);
           setSplash({ id: performance.now(), x: box.x + box.w / 2, y: box.y + box.h / 2, ok: true });
           await sleep(450);
         }
       }
       if (stopped) return;
+      over = true;
+      emit("finished", plan.length - 1);
       setBubble(null);
       setRing(null);
       setFinished(true);
@@ -207,6 +239,7 @@ export default function Walkthrough({
     return () => {
       stopped = true;
       skip.current?.();
+      if (current >= 0 && !over) emit("stopped", current);
     };
   }, [plan, animate, scope, reduce, interactive]);
 
