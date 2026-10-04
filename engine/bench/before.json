@@ -1,0 +1,74 @@
+{
+  "phase": "before",
+  "measured_at": "2026-10-03T22:52:39.505Z",
+  "runs_per_model": 5,
+  "percentile": "nearest rank (p90 is max of 5)",
+  "results": [
+    {
+      "model": "claude-sonnet-5-5",
+      "median_ms": 2136,
+      "p90_ms": 2564,
+      "detected": 5,
+      "runs": [
+        {
+          "run": 1,
+          "ms": 2564,
+          "detected": true
+        },
+        {
+          "run": 2,
+          "ms": 2113,
+          "detected": true
+        },
+        {
+          "run": 3,
+          "ms": 2165,
+          "detected": true
+        },
+        {
+          "run": 4,
+          "ms": 2136,
+          "detected": true
+        },
+        {
+          "run": 5,
+          "ms": 2078,
+          "detected": true
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "median_ms": 3180,
+      "p90_ms": 3955,
+      "detected": 5,
+      "runs": [
+        {
+          "run": 1,
+          "ms": 3955,
+          "detected": true
+        },
+        {
+          "run": 2,
+          "ms": 3092,
+          "detected": true
+        },
+        {
+          "run": 3,
+          "ms": 3180,
+          "detected": true
+        },
+        {
+          "run": 4,
+          "ms": 3402,
+          "detected": true
+        },
+        {
+          "run": 5,
+          "ms": 2299,
+          "detected": true
+        }
+      ]
+    }
+  ]
+}
