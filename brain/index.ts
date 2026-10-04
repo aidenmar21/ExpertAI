@@ -257,3 +257,4 @@ export function emptyWorkMap(job_id: string, expert: string): WorkMap {
 export * from "./records";
 export * from "./validate";
 export * from "./eval";
+export * from "./guide";

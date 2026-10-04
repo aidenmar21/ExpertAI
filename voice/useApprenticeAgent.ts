@@ -59,6 +59,8 @@ export interface ApprenticeAgentOptions {
   onTeachBackConfirmed?: () => void;
   /** Tutor asked to replay the expert's screen moment / clip for the active guardrail. */
   onReplayRequested?: (check: CheckResult | null) => void;
+  /** New hire asked to be shown how (tutor client tool show_me_how): play the on-screen walkthrough. */
+  onShowMeRequested?: () => void;
   /** Tutor hit something the Work Map doesn't cover. */
   onNewCase?: (summary: string) => void;
   onError?: (message: string) => void;
@@ -301,6 +303,14 @@ export function useApprenticeAgent(mode: AgentMode, opts: ApprenticeAgentOptions
       replay_expert_moment: () => {
         optsRef.current.onReplayRequested?.(guardrailRef.current);
         return guardrailRef.current ? "Replaying the expert's moment on screen." : "There is no moment to replay right now.";
+      },
+      guide_me: () => {
+        optsRef.current.onShowMeRequested?.();
+        return "Guiding them through every step on their screen now.";
+      },
+      show_me_how: () => {
+        optsRef.current.onShowMeRequested?.();
+        return "Playing the walkthrough on their screen now. Let them watch, then say: your turn.";
       },
       flag_new_case: (params: Record<string, unknown>) => {
         const summary = String(params?.summary ?? "").trim() || "Case not covered by the work map";

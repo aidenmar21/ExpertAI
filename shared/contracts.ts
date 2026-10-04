@@ -130,7 +130,9 @@ export type AgentContextMessage =
   | { kind: "start_debrief"; gaps: OpenGap[]; map: WorkMap }
   | { kind: "guardrail_hit"; check: CheckResult }
   | { kind: "stuck"; hint: string }
-  | { kind: "off_record"; on: boolean };
+  | { kind: "off_record"; on: boolean }
+  | { kind: "user_input"; text: string }      // what the person did in the app: keys, clicks, mouse (silent context)
+  | { kind: "guide"; steps: string[] };       // tutor: the on-screen walkthrough just started; narrate it
 // voice: sendContext(m: AgentContextMessage): void   (formats as text, e.g. "[SCREEN] field_changed refund_method Card -> Cash on R-88104")
 
 // ---------- Job profile (shared/jobs/*.json) ----------
