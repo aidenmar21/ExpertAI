@@ -1,7 +1,10 @@
+import { buildWorkMap, seedWorkMap } from "@/lib/db/brain";
 import type { ScreenEvent, TranscriptLine } from "@understudy/shared";
-import { buildWorkMap, confirmWorkMap, seedWorkMap } from "@understudy/brain/server";
-import { listJobIds } from "@/lib/job";
-import { saveServerMap } from "@/lib/serverMaps";
+import { confirmWorkMap, seedWorkMap } from "@understudy/brain/server";
+import { listJobIds } from "@/lib/db/jobs";
+import { getMap, saveMap } from "@/lib/db/workMaps";
+import { requireRole, errorResponse } from "@/lib/db/server";
+import { supabaseConfigured } from "@/lib/db/config";
 
 /**
  * POST { job_id } -> a confirmed Work Map built from a scripted expert session (demo fallback).
@@ -47,21 +50,24 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const jobId = body?.job_id ?? "";
-  if (!listJobIds().includes(jobId)) return Response.json({ error: "unknown job" }, { status: 404 });
+  if (!(await listJobIds()).includes(jobId)) return Response.json({ error: "unknown job" }, { status: 404 });
   const script = SCRIPTS[jobId];
   if (!script) return Response.json({ error: `no scripted session for ${jobId}` }, { status: 400 });
   try {
+    if (supabaseConfigured()) await requireRole(["owner", "manager", "expert"]);
+    const current = await getMap(jobId);
     const built = await buildWorkMap({
       job_id: jobId,
       expert: SEEDED_EXPERT,
       events: script.events,
       transcript: script.transcript,
-      previous: seedWorkMap(jobId, SEEDED_EXPERT),
+      previous: await seedWorkMap(jobId, SEEDED_EXPERT),
     });
     const map = confirmWorkMap(built);
-    saveServerMap(jobId, map); // the extension checks against this copy
+    await saveMap(jobId, map, current.version); // the extension checks against this copy
     return Response.json(map);
   } catch (err) {
+    if (supabaseConfigured()) return errorResponse(err);
     console.error("[api/demo]", err);
     return Response.json({ error: "seeding the Work Map failed" }, { status: 500 });
   }

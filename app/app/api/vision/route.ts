@@ -1,6 +1,7 @@
+import { appendAudit, logModelCall } from "@/lib/db/audit";
 import type { VisionRequest, VisionResponse } from "@understudy/shared";
 import { analyzeFrame } from "@understudy/engine/server";
-import { appendAudit, logModelCall, sessionFromHeaders } from "@understudy/brain/server";
+import { sessionFromHeaders } from "@understudy/brain/server";
 
 export async function POST(request: Request) {
   let body: VisionRequest;
@@ -32,9 +33,9 @@ export async function POST(request: Request) {
 // Audit: one model_call per frame and one screen_event per detected event. Never the frame, never detail text.
 function audit(session: string, latency_ms: number, result: VisionResponse) {
   try {
-    logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "vision-v1", latency_ms, redacted: true, purpose: "vision" });
+    await logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "vision-v1", latency_ms, redacted: true, purpose: "vision" });
     for (const e of result.events) {
-      appendAudit(session, {
+      await appendAudit(session, {
         actor: "expert",
         type: "screen_event",
         payload: { event_id: e.id, t: e.t, type: e.type, field: e.field ?? null, from: e.from ?? null, to: e.to ?? null, record: e.record ?? null, confidence: e.confidence },

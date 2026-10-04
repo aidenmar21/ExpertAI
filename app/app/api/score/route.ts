@@ -1,6 +1,8 @@
+import { scoreSession } from "@/lib/db/brain";
+import { appendAudit } from "@/lib/db/audit";
 import type { QuestionPick, ScreenEvent, WorkMap } from "@understudy/shared";
-import { appendAudit, scoreSession, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds } from "@/lib/job";
+import { sessionFromHeaders } from "@understudy/brain/server";
+import { listJobIds } from "@/lib/db/jobs";
 
 interface ScoreRequest {
   job_id: string;
@@ -21,11 +23,11 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  if (!listJobIds().includes(body?.job_id) || !body.map) {
+  if (!(await listJobIds()).includes(body?.job_id) || !body.map) {
     return Response.json({ error: "expected { job_id, map, ... }" }, { status: 400 });
   }
   try {
-    const result = scoreSession({
+    const result = await scoreSession({
       job_id: body.job_id,
       map: body.map,
       groundTruth: (body.ground_truth ?? []).map((g) => ({
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
       questions: body.questions ?? [],
     });
     try {
-      appendAudit(sessionFromHeaders(request.headers), { actor: "system", type: "scoreboard", payload: { job_id: body.job_id, ...result.scoreboard } });
+      await appendAudit(sessionFromHeaders(request.headers), { actor: "system", type: "scoreboard", payload: { job_id: body.job_id, ...result.scoreboard } });
     } catch (err) {
       console.error("[api/score] audit", err);
     }

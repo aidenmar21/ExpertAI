@@ -1,6 +1,6 @@
+import { appendAudit, verifyAudit, listSessions } from "@/lib/db/audit";
 import {
-  AUDIT_ACTORS, AUDIT_TYPES, appendAudit, listSessions, safeSessionId, sessionFromHeaders, verifyAudit,
-  type AuditActor, type AuditType,
+  AUDIT_ACTORS, AUDIT_TYPES, safeSessionId, sessionFromHeaders, type AuditActor, type AuditType,
 } from "@understudy/brain/server";
 
 /**
@@ -9,8 +9,8 @@ import {
  */
 export async function GET(request: Request) {
   const session = new URL(request.url).searchParams.get("session");
-  if (!session) return Response.json({ sessions: listSessions() });
-  const v = verifyAudit(safeSessionId(session));
+  if (!session) return Response.json({ sessions: await listSessions() });
+  const v = await verifyAudit(safeSessionId(session));
   return Response.json({ entries: v.entries, verify: { ok: v.ok, ...(v.broken_at != null ? { broken_at: v.broken_at } : {}) } });
 }
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const actor = (AUDIT_ACTORS as readonly string[]).includes(body.actor ?? "") ? (body.actor as AuditActor) : "system";
   const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload) ? (body.payload as Record<string, unknown>) : {};
   try {
-    const entry = appendAudit(sessionFromHeaders(request.headers), { actor, type: body.type as AuditType, payload });
+    const entry = await appendAudit(sessionFromHeaders(request.headers), { actor, type: body.type as AuditType, payload });
     return Response.json({ ok: true, seq: entry.seq, hash: entry.hash, session_id: entry.session_id });
   } catch (err) {
     console.error("[api/audit]", err);

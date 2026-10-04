@@ -1,9 +1,9 @@
 import type { CreateJobInput } from "@/lib/job";
-import { createJob, listJobSummaries } from "@/lib/job";
+import { createJob, listJobSummaries } from "@/lib/db/jobs";
 
 /** GET: every job in shared/jobs with its role and software names resolved from the knowledge index. */
 export async function GET() {
-  return Response.json({ jobs: listJobSummaries() });
+  return Response.json({ jobs: await listJobSummaries() });
 }
 
 /** POST { name, role_id?, software_ids?, written_policy?, escalate_to?, category?, business_date? }: create shared/jobs/<id>.json. */
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "expected { name, role_id?, software_ids?, written_policy? }" }, { status: 400 });
   }
   try {
-    const profile = createJob({
+    const profile = await createJob({
       name: body.name,
       role_id: typeof body.role_id === "string" ? body.role_id : null,
       software_ids: Array.isArray(body.software_ids) ? body.software_ids.filter((s): s is string => typeof s === "string") : undefined,

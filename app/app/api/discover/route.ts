@@ -1,7 +1,8 @@
+import { appendAudit, logModelCall } from "@/lib/db/audit";
 import type { JobProfile } from "@understudy/shared";
 import { discoverScreen } from "@understudy/engine/server";
-import { appendAudit, knowledgeForJob, logModelCall, sessionFromHeaders, softwareVocabulary } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
+import { knowledgeForJob, sessionFromHeaders, softwareVocabulary } from "@understudy/brain/server";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
 
 export interface DiscoveredField { key: string; label: string; type: string; options?: string[]; known: boolean; }
 
@@ -17,10 +18,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id) || typeof body.frame_jpeg_base64 !== "string") {
+  if (!(await listJobIds()).includes(id) || typeof body.frame_jpeg_base64 !== "string") {
     return Response.json({ error: "expected { job_id, frame_jpeg_base64 }" }, { status: 400 });
   }
-  const job = loadJob(id);
+  const job = (await loadJob(id));
   const session = sessionFromHeaders(request.headers);
   const started = Date.now();
   const screen: JobProfile["screen"] = await discoverScreen(body.frame_jpeg_base64);
@@ -34,8 +35,8 @@ export async function POST(request: Request) {
   const fields: DiscoveredField[] = screen.fields.map((f) => ({ ...f, known: known(f.label) }));
   const actions = screen.actions.map((a) => ({ ...a, known: known(a.label) }));
   try {
-    logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "discover-v1", latency_ms, redacted: true, purpose: "discover" });
-    appendAudit(session, {
+    await logModelCall(session, { model: process.env.VISION_MODEL, prompt_version: "discover-v1", latency_ms, redacted: true, purpose: "discover" });
+    await appendAudit(session, {
       actor: "expertai",
       type: "discovery",
       payload: {

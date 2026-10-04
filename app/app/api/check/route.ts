@@ -1,8 +1,10 @@
+import { appendAudit } from "@/lib/db/audit";
 import type { CheckResult, Value, WorkMap } from "@understudy/shared";
 import { canonicalField, checkAction } from "@understudy/brain";
-import { appendAudit, sessionFromHeaders } from "@understudy/brain/server";
-import { listJobIds, loadJob } from "@/lib/job";
-import { loadServerMap } from "@/lib/serverMaps";
+import { sessionFromHeaders } from "@understudy/brain/server";
+import { listJobIds, loadJob } from "@/lib/db/jobs";
+import { getMap } from "@/lib/db/workMaps";
+import { supabaseConfigured } from "@/lib/db/config";
 
 interface CheckBody { job_id?: string; action?: string; record?: Record<string, Value>; map?: WorkMap }
 
@@ -19,14 +21,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
   const id = body.job_id ?? "";
-  if (!listJobIds().includes(id) || typeof body.action !== "string" || !body.action) {
+  if (!(await listJobIds()).includes(id) || typeof body.action !== "string" || !body.action) {
     return Response.json({ error: "expected { job_id, action, record, map? }" }, { status: 400 });
   }
   // The caller's map wins; otherwise the job's latest map saved by /api/workmap (the extension has no browser copy).
-  const map = body.map && Array.isArray(body.map.rules) ? body.map : loadServerMap(id);
+  const map = supabaseConfigured() ? (await getMap(id)).map : body.map && Array.isArray(body.map.rules) ? body.map : (await getMap(id)).map;
   if (!map || !Array.isArray(map.rules)) return Response.json({ ok: true } satisfies CheckResult);
 
-  const job = loadJob(id);
+  const job = (await loadJob(id));
   // Field names from a third-party page are its labels (refund_to); map them onto the job's keys (refund_method).
   const raw = body.record && typeof body.record === "object" ? body.record : {};
   const record: Record<string, Value> = {};
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
 
   if (!check.ok) {
     try {
-      appendAudit(sessionFromHeaders(request.headers), {
+      await appendAudit(sessionFromHeaders(request.headers), {
         actor: "expertai",
         type: "tutor_intervention",
         payload: {
