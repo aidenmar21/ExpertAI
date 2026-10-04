@@ -132,3 +132,11 @@ auth.users ──< memberships >── orgs                     (role: owner | m
 - **Stats** (`app/lib/stats.ts`) stay in localStorage only.
 - No org switcher or invite UI yet (the `expertai-org` cookie selects among memberships; the invite API is above).
 - Clearing a map in the browser (demo reset) clears the local cache only; the server copy remains.
+
+## Turning it on
+
+Supabase stays off until you opt in, so adding keys can never change how the demo runs:
+
+1. Apply `migrations/0001_init.sql`, `migrations/0002_anonymous_sessions.sql`, then `seed.sql` (in order).
+2. Add `http://localhost:3000/auth/callback` under Authentication -> URL Configuration -> Redirect URLs.
+3. In `app/.env.local` set the three keys **and** `EXPERTAI_USE_SUPABASE=1`, then restart `npm run dev`.
