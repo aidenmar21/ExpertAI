@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import type { ScreenEvent, ScreenState, WorkMap } from "@understudy/shared";
+import type { JobAction, JobField, ScreenEvent, ScreenState, WorkMap } from "@understudy/shared";
 import { startCapture, type CaptureHandle } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
 import { resetSession, screenEvents, sessionT } from "@/lib/session";
@@ -15,19 +15,26 @@ import DiscoveryReview, { type Discovered } from "@/components/DiscoveryReview";
 import { banner, btn, card, emptyBox, eyebrow, field, link, pill } from "@/components/ui/styles";
 import { auditHeaders, logAudit } from "@/lib/audit";
 import { putFrame } from "@/lib/frames";
+import { useInputNarration } from "@/lib/inputNarration";
 
 /** Live feed of what the apprentice saw on screen, plus the voice agent. */
-interface PanelProps { jobId: string; escalateTo: string; expert?: string; screenFields?: number; }
+interface PanelProps {
+  jobId: string; escalateTo: string; expert?: string; screenFields?: number;
+  /** The app's fields and buttons, so keys and clicks can be narrated to the agent by name. */
+  fields?: JobField[]; actions?: JobAction[];
+}
+const NO_FIELDS: JobField[] = [];
+const NO_ACTIONS: JobAction[] = [];
 
-export default function ApprenticePanel({ jobId, escalateTo, expert = "Aarav", screenFields = 0 }: PanelProps) {
+export default function ApprenticePanel({ jobId, escalateTo, expert = "Aarav", screenFields = 0, fields = NO_FIELDS, actions = NO_ACTIONS }: PanelProps) {
   return (
     <ApprenticeVoiceProvider>
-      <Panel jobId={jobId} escalateTo={escalateTo} expert={expert} screenFields={screenFields} />
+      <Panel jobId={jobId} escalateTo={escalateTo} expert={expert} screenFields={screenFields} fields={fields} actions={actions} />
     </ApprenticeVoiceProvider>
   );
 }
 
-function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>) {
+function Panel({ jobId, escalateTo, expert, screenFields, fields, actions }: Required<PanelProps>) {
   const events = useSyncExternalStore(screenEvents.subscribe, screenEvents.all, noEvents);
   const map = useWorkMap(jobId, expert);
   const briefing = useBriefing(jobId);
@@ -58,6 +65,8 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
       rebuildWorkMap({ ...history(), confirm: true }).catch(() => setError("Could not confirm the Work Map"));
     },
   });
+  // Teach mode: every key, click, and mouse move in the app goes to the agent as silent [INPUT] context.
+  useInputNarration(agent.sendContext, fields, actions);
   useEffect(() => {
     agentRef.current = agent;
   });
@@ -364,6 +373,8 @@ function Panel({ jobId, escalateTo, expert, screenFields }: Required<PanelProps>
           </section>
         )}
 
+        <AgentHearing outbox={agent.outbox} connected={connected} />
+
         <div className="flex items-center justify-between gap-3 pb-3">
           <p className={eyebrow}>Screen events</p>
           {watching && !found && (
@@ -622,5 +633,26 @@ export function EventRow({ e }: { e: ScreenEvent }) {
       )}
       {e.detail && <p className="mt-0.5 text-meta text-ink-secondary">{e.detail}</p>}
     </li>
+  );
+}
+
+/** The last few [INPUT] lines the voice agent was given: proof it is following the keys, clicks, and mouse. */
+function AgentHearing({ outbox, connected }: { outbox: ApprenticeAgent["outbox"]; connected: boolean }) {
+  const lines = outbox.filter((o) => o.text.startsWith("[INPUT]")).slice(-6).reverse();
+  if (!lines.length) return null;
+  return (
+    <section className="pb-6" aria-label="What the agent is hearing">
+      <p className={`${eyebrow} pb-2`}>
+        Agent is following your steps {connected ? "· live" : "· sent when the voice agent connects"}
+      </p>
+      <ol className="space-y-1.5">
+        {lines.map((o) => (
+          <li key={o.id} className="rounded-md border border-line bg-surface-subtle px-3 py-2 text-[13px] leading-5 text-ink">
+            {o.text.replace(/^\[INPUT\]\s*/, "")}
+            <span className="ml-2 text-note text-ink-tertiary">{o.outcome}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }

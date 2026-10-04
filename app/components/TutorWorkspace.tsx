@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { CheckResult, JobProfile, ScreenEvent, StuckSignals, Value, WorkMap } from "@understudy/shared";
-import { checkAction } from "@understudy/brain";
+import { checkAction, nextStep, planWalkthrough, type ExpertDemo, type GuideStep } from "@understudy/brain";
 import { detectStuck, startCapture, stuckScore } from "@understudy/engine";
 import { ApprenticeVoiceProvider, useApprenticeAgent, type ApprenticeAgent } from "@understudy/voice";
 import FakeApp from "@/components/FakeApp";
+import GuideCursor from "@/components/GuideCursor";
+import Walkthrough from "@/components/Walkthrough";
+import { GuideBar, GuideMeButton, barBtn } from "@/components/GuideBar";
+import { expertDemos } from "@/lib/keytrace";
 import { EventRow, isPermissionDenied } from "@/components/ApprenticePanel";
 import type { ClientJob, JobRecord } from "@/lib/job";
 import { activity, screenEvents, sessionT } from "@/lib/session";
@@ -21,6 +25,7 @@ import { banner, btn, card, emptyBox, eyebrow, link, pill } from "@/components/u
 import { MomentThumb } from "@/components/Provenance";
 
 const STUCK_TICK_MS = 1000;
+const NO_DEMOS: ExpertDemo[] = [];
 const GUIDE_EVERY_MS = 45_000; // at most one stuck hint per 45s
 
 /** POST /api/guide: the usual next step for the record on screen, from the pre-loaded role knowledge. */
@@ -46,6 +51,17 @@ function Tutor({ profile }: { profile: ClientJob }) {
   const expert = map?.expert || "The expert";
   const [blocked, setBlocked] = useState<{ action: string; check: CheckResult } | null>(null);
   const [replay, setReplay] = useState(false);
+  const [showMe, setShowMe] = useState(true); // on by default: the new hire sees each step as they go
+  const [open, setOpen] = useState<{ record: JobRecord; touched: string[]; expected: JobRecord; onScreen: JobRecord } | null>(null);
+  const [walk, setWalk] = useState<GuideStep[] | null>(null);
+  const initial = useRef(new Map<number, JobRecord>());
+  // Fields the new hire has changed on this record: the guide moves past the expert's steps they've done.
+  const onRecord = useCallback((r: JobRecord, i: number, expected: JobRecord, onScreen: JobRecord) => {
+    if (!initial.current.has(i)) initial.current.set(i, r);
+    const first = initial.current.get(i)!;
+    setOpen({ record: r, touched: Object.keys(r).filter((k) => r[k] !== first[k]), expected, onScreen });
+  }, []);
+  const demos = useSyncExternalStore(expertDemos.subscribe, expertDemos.all, () => NO_DEMOS);
 
   const agent = useApprenticeAgent("tutor", {
     expert,
@@ -54,9 +70,43 @@ function Tutor({ profile }: { profile: ClientJob }) {
     briefing,
     now: sessionT,
     onReplayRequested: () => setReplay(true),
+    onShowMeRequested: () => showMeHow.current("voice"),
+    // Asked out loud ("show me", "how do I…"): play the walkthrough even if the agent doesn't call the tool.
+    onTranscript: (line) => {
+      if (line.speaker === "new_hire" && /\b(show me|guide me|how do i|how do you|walk me through|what do i do)\b/i.test(line.text)) showMeHow.current("asked");
+    },
     // Neither a company rule nor the standard covers it: it becomes an open gap for the next expert session.
     onNewCase: (summary) => workMaps.addGap(jobId, { id: `gap-${Date.now()}`, question: `New hire case: ${summary}` }),
   });
+
+  // Show-me pointer: the next field or button for the open record, from the rules and the expert's own steps.
+  const step = useMemo(
+    () => (open ? nextStep({ ...open, map, job: profile as unknown as JobProfile, demos }) : null),
+    [open, map, profile, demos],
+  );
+
+  // "Show me how": a drawn mouse plays the rest of this case through, then the pointer guide takes over.
+  const showMeHow = useRef<(how: "button" | "voice" | "asked") => void>(() => {});
+  useEffect(() => {
+    showMeHow.current = (how) => {
+      if (!open) return;
+      const plan = planWalkthrough({ ...open, map, job: profile as unknown as JobProfile, demos });
+      if (!plan.length) return;
+      setWalk(plan);
+      // The tutor gets the same steps, so it can talk the new hire through them while the mouse plays.
+      agent.sendContext({ kind: "guide", steps: plan.map((p) => (p.value != null && p.target.kind === "field" ? `${p.say} (${p.value})` : p.say)) });
+      logAudit("show_me_how", { how, steps: plan.length, from_expert: plan.filter((p) => p.path).length }, "new_hire");
+    };
+  }, [open, map, profile, demos, agent]);
+
+  function toggleShowMe() {
+    const on = !showMe;
+    setShowMe(on);
+    if (on && step) {
+      agent.sendContext({ kind: "stuck", hint: step.why ? `${step.say} ${step.why}` : step.say });
+      logAudit("show_me", { target: `${step.target.kind}:${step.target.key}`, source: step.source, rule_id: step.rule_id ?? null }, "new_hire");
+    }
+  }
 
   const confirmedRules = map?.rules.filter((r) => r.confirmed).length ?? 0;
   const standardRules = map?.rules.filter((r) => r.source === "baseline" && !r.confirmed && !r.overridden_by).length ?? 0;
@@ -72,6 +122,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
     }
     setBlocked({ action, check });
     setReplay(false);
+    setShowMe(true);
     sessionStats.update(jobId, (st) => ({ ...st, blocked: [...st.blocked, { caseIndex, action, t: sessionT() }] }));
     agent.sendContext({ kind: "guardrail_hit", check });
     logAudit("tutor_intervention", {
@@ -109,8 +160,54 @@ function Tutor({ profile }: { profile: ClientJob }) {
 
   return (
     <main className="mx-auto grid w-full max-w-[90rem] min-h-0 flex-1 grid-cols-1 gap-6 px-5 pb-6 pt-6 sm:px-6 md:px-8 lg:grid-cols-[minmax(0,1fr)_25rem]">
-      <div className="min-h-[32rem] min-w-0">
-        <FakeApp profile={profile} mode="new_hire" beforeAction={beforeAction} notice={notice} />
+      <div className="flex min-h-[32rem] min-w-0 flex-col gap-3">
+        <GuideBar
+          title="Learn this case"
+          status={
+            walk
+              ? "Follow the mouse. It shows each step, then waits while you do it."
+              : step
+                ? <>Next: <span className="font-medium text-ink">{step.say}</span> Stuck? Press Guide me or ask the tutor.</>
+                : "All done here. Pick the next case from the queue."
+          }
+        >
+          {!walk && (
+            <button type="button" onClick={toggleShowMe} aria-pressed={showMe} disabled={!step} className={showMe ? barBtn.quietOn : barBtn.quiet}>
+              {showMe ? "Hide pointer" : "Show pointer"}
+            </button>
+          )}
+          <GuideMeButton running={!!walk} disabled={!walk && !step} onClick={() => (walk ? setWalk(null) : showMeHow.current("button"))} />
+        </GuideBar>
+        <div className="min-h-0 flex-1">
+          <FakeApp
+            profile={profile}
+            mode="new_hire"
+            beforeAction={beforeAction}
+            notice={notice}
+            onRecord={onRecord}
+            overlay={
+              <>
+                {walk && (
+                  <Walkthrough
+                    plan={walk}
+                    expert={expert}
+                    interactive
+                    onDone={() => {
+                      setWalk(null);
+                      setShowMe(true);
+                    }}
+                  />
+                )}
+                <GuideCursor
+                  step={showMe && !walk ? step : null}
+                  expert={expert}
+                  stepLabel={step?.source === "expert_demo" ? `Next step · how ${expert} did it` : "Next step"}
+                  onClose={() => setShowMe(false)}
+                />
+              </>
+            }
+          />
+        </div>
       </div>
       <div className="min-h-[24rem] min-w-0">
         <TutorPanel agent={agent} jobId={jobId} confirmedRules={confirmedRules} standardRules={standardRules} hasMap={!!map} />
