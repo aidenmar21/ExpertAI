@@ -54,6 +54,14 @@ test("only screen events are silent context", () => {
   assert.equal(deliveryFor({ kind: "stuck", hint: "h" }), "turn");
 });
 
+test("keyboard and mouse input is silent context; the guide makes the agent speak", () => {
+  assert.equal(formatContext({ kind: "user_input", text: "Typed \"R-88101\" in Receipt no." }), '[INPUT] Typed "R-88101" in Receipt no.');
+  assert.equal(deliveryFor({ kind: "user_input", text: "x" }), "context");
+  assert.equal(deliveryFor({ kind: "guide", steps: ["a"] }), "turn");
+  assert.match(formatContext({ kind: "guide", steps: ["Enter the receipt no.", "Click Refund."] }), /^\[GUIDE\][\s\S]*1\. Enter the receipt no\.\n2\. Click Refund\./);
+  assert.deepEqual(holdOutgoing({ kind: "user_input", text: "x" }, { offRecord: true, debrief: "idle" })?.outcome, "held");
+});
+
 test("ask now, stuck, off record", () => {
   assert.equal(
     formatContext({ kind: "ask_now", pick: { question: "Why cash?", about_event_id: "e1", is_guardrail: true } }),

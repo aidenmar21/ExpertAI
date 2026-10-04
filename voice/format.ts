@@ -14,10 +14,10 @@ export interface FormatOptions {
 }
 
 /** Every bracket tag we send. Used to recognise our own messages if the SDK echoes them back. */
-export const CONTEXT_TAGS = ["[SCREEN]", "[ASK NOW]", "[DEBRIEF]", "[GUARDRAIL]", "[STUCK]", "[OFF RECORD]", "[ON RECORD]"];
+export const CONTEXT_TAGS = ["[SCREEN]", "[ASK NOW]", "[DEBRIEF]", "[GUARDRAIL]", "[STUCK]", "[OFF RECORD]", "[ON RECORD]", "[INPUT]", "[GUIDE]"];
 
 export function deliveryFor(m: AgentContextMessage): Delivery {
-  return m.kind === "screen_event" ? "context" : "turn";
+  return m.kind === "screen_event" || m.kind === "user_input" ? "context" : "turn";
 }
 
 function show(v: Value | undefined): string {
@@ -94,6 +94,16 @@ export function formatContext(m: AgentContextMessage, opts: FormatOptions = {}):
 
     case "off_record":
       return m.on ? "[OFF RECORD]" : "[ON RECORD]";
+
+    case "user_input":
+      return `[INPUT] ${oneLine(m.text)}`;
+
+    case "guide": {
+      const lines = ["[GUIDE] A mouse is now showing these steps on their screen, in order:"];
+      m.steps.forEach((s, i) => lines.push(`${i + 1}. ${oneLine(s)}`));
+      lines.push("Talk them through it as it plays: one short sentence per step. Then say \"Your turn.\"");
+      return lines.join("\n");
+    }
   }
 }
 
@@ -129,7 +139,7 @@ export type OutgoingHold = { outcome: "held" | "dropped"; reason: string };
  * Off the record the agent must not see the screen or be prompted about it; during the debrief only the runner asks.
  */
 export function holdOutgoing(m: AgentContextMessage, s: { offRecord: boolean; debrief: string }): OutgoingHold | null {
-  if (s.offRecord && (m.kind === "screen_event" || m.kind === "ask_now")) return { outcome: "held", reason: "off the record" };
+  if (s.offRecord && (m.kind === "screen_event" || m.kind === "ask_now" || m.kind === "user_input")) return { outcome: "held", reason: "off the record" };
   if (m.kind === "ask_now" && (s.debrief === "asking" || s.debrief === "teach_back")) return { outcome: "dropped", reason: "debrief in progress" };
   return null;
 }
