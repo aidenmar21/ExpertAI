@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { GuideStep } from "@understudy/brain";
-import { KeyCaps } from "@/components/KeyCast";
+import { KeyLine } from "@/components/KeyCast";
 
 interface Box { x: number; y: number; w: number; h: number; rootW: number; rootH: number; minX: number }
 
@@ -140,11 +140,11 @@ export default function GuideCursor({
             >
               {!reduce && <span className="absolute -left-4 -top-4 size-8 animate-ping rounded-full bg-sky-400/60" />}
               <motion.svg
-                width="48"
-                height="48"
+                width="64"
+                height="64"
                 viewBox="0 0 24 24"
                 aria-hidden
-                style={{ filter: "drop-shadow(0 4px 10px rgba(14,165,233,0.7))" }}
+                style={{ filter: "drop-shadow(0 0 10px rgba(56,189,248,0.95)) drop-shadow(0 4px 12px rgba(2,132,199,0.8))" }}
                 animate={reduce ? undefined : { x: [0, -3, 0], y: [0, -3, 0] }}
                 transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
               >
@@ -184,7 +184,7 @@ export default function GuideCursor({
               {!action && keys.length > 0 && (
                 <div className="mt-2.5">
                   <p className="mb-1.5 text-[12px] font-semibold text-sky-100">{step.source === "case" ? "Type:" : `${expert} typed:`}</p>
-                  <KeyCaps keys={keys.slice(-16)} size="lg" />
+                  <KeyLine keys={keys} />
                 </div>
               )}
               {action && (

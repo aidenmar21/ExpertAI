@@ -110,7 +110,11 @@ function pickStep(input: GuideInput): GuideStep | null {
         target: { kind: "field", key: k },
         value: want,
         keys: select ? undefined : typedKeys(want, f.type, input.onScreen?.[k]),
-        say: select ? `Choose ${f.label}.` : `Enter the ${f.label.toLowerCase().replace(/\.$/, "")}.`,
+        say: select
+          ? `Choose ${f.label}.`
+          : f.type === "date" && !/date/i.test(f.label)
+            ? `Enter the ${f.label.toLowerCase().replace(/d$/, "")} date.` // "Purchased" -> "the purchase date"
+            : `Enter the ${f.label.toLowerCase().replace(/\.$/, "")}.`,
         why: `It's on the customer's slip: ${select ? "pick" : "type"} it exactly.`,
         source: "case",
       };

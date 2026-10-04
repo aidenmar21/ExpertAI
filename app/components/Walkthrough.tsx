@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useAnimate, useReducedMotion } from "motion/react";
 import type { GuideStep } from "@understudy/brain";
-import { KeyCaps } from "@/components/KeyCast";
+import { KeyLine } from "@/components/KeyCast";
 import { Puddle } from "@/components/MouseTrail";
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -16,6 +16,9 @@ export interface WalkEvent {
   typed?: string;            // on "wrong": what is in the box
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The big mouse is 72px; its tip sits this far into the box. */
+const CURSOR = 72;
+const TIP = { x: (3 / 24) * CURSOR, y: (2 / 24) * CURSOR };
 
 interface Bubble {
   x: number;
@@ -67,6 +70,11 @@ export default function Walkthrough({
   const [splash, setSplash] = useState<{ id: number; x: number; y: number; ok?: boolean } | null>(null);
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [finished, setFinished] = useState(false);
+  // The glowing line the mouse leaves as it drags to the next target (fades once it clicks).
+  const [trail, setTrail] = useState<{ x: number; y: number }[]>([]);
+  const [trailFade, setTrailFade] = useState(false);
+  // Near the bottom edge the mouse points up from below, so its body is never cut off.
+  const [flip, setFlip] = useState(false);
   const skip = useRef<(() => void) | null>(null);
   const done = useRef(onDone);
   const report = useRef(onEvent);
@@ -173,6 +181,7 @@ export default function Walkthrough({
         const box = boxOf(el);
         setRing(box);
         const end = { x: box.x + Math.min(box.w * 0.6, box.w - 16), y: box.y + box.h * 0.6 };
+        setFlip(end.y + CURSOR > o().height - 4);
         // The expert's path, scaled to this screen, ending on the target; else a gentle curve.
         const b = o();
         const via = step.path?.length
@@ -180,15 +189,28 @@ export default function Walkthrough({
           : [{ x: (at.x + end.x) / 2 + 40, y: Math.min(at.y, end.y) - 30 }];
         const pts = [at, ...via, end];
         const dist = pts.slice(1).reduce((d, p, j) => d + Math.hypot(p.x - pts[j].x, p.y - pts[j].y), 0);
+        // Draw the drag: record where the mouse tip actually is on every frame while it moves.
+        const drawn: { x: number; y: number }[] = [];
+        let raf = 0;
+        const follow = () => {
+          const r = cursor.getBoundingClientRect(), b2 = o();
+          drawn.push({ x: r.left - b2.left + TIP.x, y: r.top - b2.top + TIP.y });
+          setTrail([...drawn]);
+          raf = requestAnimationFrame(follow);
+        };
+        setTrailFade(false);
+        if (!reduce) raf = requestAnimationFrame(follow);
         await animate(
           cursor,
           { x: pts.map((p) => p.x), y: pts.map((p) => p.y) },
-          { duration: reduce ? 0 : Math.min(1.8, Math.max(0.7, dist / 500)), ease: "easeInOut" },
+          { duration: reduce ? 0 : Math.min(2, Math.max(0.9, dist / 420)), ease: "easeInOut" },
         );
+        cancelAnimationFrame(raf);
         if (stopped) return;
         at = end;
-        // Click: the cursor dips and a puddle spreads.
-        setSplash({ id: performance.now(), x: end.x, y: end.y });
+        // Click: the cursor dips, a puddle spreads, and the drag line fades.
+        setTrailFade(true);
+        setSplash({ id: performance.now(), x: end.x + TIP.x, y: end.y + TIP.y });
         await animate(cursor, { scale: [1, 0.8, 1] }, { duration: 0.25 });
         await sleep(300);
 
@@ -224,6 +246,7 @@ export default function Walkthrough({
           if (stopped) return;
           emit(how === "skipped" ? "skipped" : "step_done", k);
           setSplash({ id: performance.now(), x: box.x + box.w / 2, y: box.y + box.h / 2, ok: true });
+          setTrail([]);
           await sleep(450);
         }
       }
@@ -254,28 +277,50 @@ export default function Walkthrough({
         {ring && (
           <motion.div
             key="ring"
-            className={`absolute rounded-lg ring-4 ${yours ? "ring-amber-400" : "bg-white/10 ring-sky-400"}`}
-            style={{ boxShadow: yours ? "0 0 28px 8px rgba(251,191,36,0.75)" : "0 0 28px 8px rgba(56,189,248,0.8)" }}
+            className={`absolute rounded-lg ring-4 ring-sky-400 ${yours ? "" : "bg-white/10"}`}
+            style={{ boxShadow: yours ? "0 0 36px 12px rgba(56,189,248,0.9)" : "0 0 28px 8px rgba(56,189,248,0.8)" }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1, left: ring.x - 6, top: ring.y - 6, width: ring.w + 12, height: ring.h + 12 }}
             exit={{ opacity: 0 }}
             transition={{ type: "spring", stiffness: 160, damping: 22 }}
-          />
+          >
+            {yours && !reduce && <span className="absolute -inset-1 animate-ping rounded-lg ring-4 ring-sky-300/60" />}
+          </motion.div>
         )}
       </AnimatePresence>
+
+      {/* The drag line: a glowing blue trail from where the mouse was to the target. */}
+      {trail.length > 1 && (
+        <svg
+          aria-hidden
+          className="absolute inset-0 size-full transition-opacity duration-700"
+          style={{ opacity: trailFade ? 0 : 1, filter: "drop-shadow(0 0 6px rgba(56,189,248,0.9))" }}
+        >
+          <polyline
+            points={trail.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill="none"
+            stroke="rgb(56,189,248)"
+            strokeWidth={6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeOpacity={0.85}
+          />
+          <polyline points={trail.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={0.9} />
+        </svg>
+      )}
 
       {splash && <Puddle key={splash.id} x={splash.x} y={splash.y} size={1.3} color={splash.ok ? "16,185,129" : undefined} />}
 
       {bubble && (
         <motion.div
           className={`absolute rounded-xl px-3 py-2 text-white shadow-2xl ring-2 ${
-            !bubble.yours ? "bg-slate-900/90 ring-sky-400" : bubble.wrong ? "bg-rose-700/95 ring-rose-300" : "bg-slate-900/90 ring-amber-400"
+            bubble.wrong ? "bg-rose-700/95 ring-rose-300" : "bg-slate-900/90 ring-sky-400"
           } ${bubble.yours ? "pointer-events-auto" : ""}`}
           style={bubble.above !== undefined ? { left: bubble.x, bottom: bubble.above, maxWidth: 440 } : { left: bubble.x, top: bubble.y, maxWidth: 440 }}
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <p className={`mb-1.5 text-[12px] font-bold uppercase tracking-wide ${bubble.yours ? (bubble.wrong ? "text-rose-100" : "text-amber-300") : "text-sky-300"}`}>
+          <p className={`mb-1.5 text-[12px] font-bold uppercase tracking-wide ${bubble.wrong ? "text-rose-100" : "text-sky-300"}`}>
             {!bubble.yours
               ? bubble.action
                 ? "Click"
@@ -297,7 +342,7 @@ export default function Walkthrough({
               <span className="rounded-md bg-sky-400 px-2.5 py-0.5 text-slate-950">{bubble.value ?? "a value"}</span>
             </p>
           ) : (
-            <KeyCaps keys={bubble.yours ? bubble.keys : bubble.keys.slice(0, bubble.n)} size="lg" done={bubble.yours ? bubble.n : undefined} />
+            <KeyLine keys={bubble.keys} shown={bubble.yours ? undefined : bubble.n} done={bubble.yours ? bubble.n : undefined} />
           )}
           {bubble.yours && (
             <button
@@ -312,36 +357,44 @@ export default function Walkthrough({
       )}
 
       {/* The drawn mouse. */}
-      <div ref={scope} className="absolute left-0 top-0 opacity-0" style={{ willChange: "transform" }}>
-        <motion.svg
-          width="56"
-          height="56"
-          viewBox="0 0 24 24"
+      {/* The big glowing mouse. */}
+      <div ref={scope} className="absolute left-0 top-0 z-10 opacity-0" style={{ willChange: "transform" }}>
+        <span
           aria-hidden
-          style={{ filter: "drop-shadow(0 6px 12px rgba(2,132,199,0.75))" }}
-          animate={yours && !reduce ? { x: [0, -4, 0], y: [0, -4, 0] } : { x: 0, y: 0 }}
-          transition={{ duration: 0.9, repeat: yours ? Infinity : 0, ease: "easeInOut" }}
-        >
-          <path d="M3 2l17 8.5-7.2 1.8L9.6 20z" fill={yours ? "#fbbf24" : "#38bdf8"} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
-        </motion.svg>
+          className="absolute rounded-full bg-sky-400/45 blur-md motion-safe:animate-pulse"
+          style={{ left: TIP.x - 22, top: TIP.y - 22, width: 44, height: 44 }}
+        />
+        <span className="relative block" style={flip ? { transform: `translateY(${-(CURSOR - 2 * TIP.y)}px) scaleY(-1)` } : undefined}>
+          <motion.svg
+            width={CURSOR}
+            height={CURSOR}
+            viewBox="0 0 24 24"
+            aria-hidden
+            className="relative block"
+            style={{ filter: "drop-shadow(0 0 10px rgba(56,189,248,0.95)) drop-shadow(0 6px 14px rgba(2,132,199,0.8))" }}
+            animate={yours && !reduce ? { x: [0, -5, 0], y: [0, -5, 0] } : { x: 0, y: 0 }}
+            transition={{ duration: 0.9, repeat: yours ? Infinity : 0, ease: "easeInOut" }}
+          >
+            <path d="M3 2l17 8.5-7.2 1.8L9.6 20z" fill="#38bdf8" stroke="white" strokeWidth="1.4" strokeLinejoin="round" />
+          </motion.svg>
+        </span>
       </div>
 
-      {/* Caption: which step, in big type. */}
-      <div aria-live="assertive" className="absolute inset-x-0 top-24 flex justify-center px-3">
+      {/* Caption: one line on the app's dark header bar, so it never covers the title, slip, fields, or buttons. */}
+      <div aria-live="assertive" className="absolute inset-x-2 top-1 flex justify-center">
         <div
-          className={`rounded-2xl px-5 py-3 text-center text-white shadow-2xl ring-1 ring-white/30 ${
-            yours ? "bg-gradient-to-br from-amber-500 to-orange-600" : finished ? "bg-gradient-to-br from-emerald-500 to-teal-600" : "bg-gradient-to-br from-sky-500 to-indigo-600"
+          className={`flex max-w-full items-center gap-2.5 truncate rounded-full px-4 py-1 text-white shadow-[0_0_22px_4px_rgba(56,189,248,0.6)] ring-1 ring-white/40 ${
+            finished ? "bg-gradient-to-r from-emerald-500 to-teal-600" : "bg-gradient-to-r from-sky-500 to-blue-600"
           }`}
         >
           {finished ? (
-            <p className="text-xl font-bold">{interactive ? "Done! You did every step." : "That's the whole case."}</p>
+            <span className="text-base font-bold">{interactive ? "Done! You did every step." : "That's the whole case."}</span>
           ) : (
             <>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-white/80">
-                {yours ? "Your turn" : `Watch how ${expert} does it`} · step {i + 1} of {plan.length}
-              </p>
-              <p className="mt-0.5 text-xl font-bold leading-snug">{step?.say}</p>
-              {yours && <p className="mt-0.5 text-[13px] font-semibold text-white/90">The guide waits until you do it.</p>}
+              <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider">
+                {yours ? "Your turn" : `Watch ${expert}`} · {i + 1}/{plan.length}
+              </span>
+              <span className="truncate text-base font-bold">{step?.say}</span>
             </>
           )}
         </div>

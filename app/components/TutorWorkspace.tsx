@@ -51,7 +51,7 @@ function Tutor({ profile }: { profile: ClientJob }) {
   const expert = map?.expert || "The expert";
   const [blocked, setBlocked] = useState<{ action: string; check: CheckResult } | null>(null);
   const [replay, setReplay] = useState(false);
-  const [showMe, setShowMe] = useState(true); // on by default: the new hire sees each step as they go
+  const [showMe, setShowMe] = useState(false); // off until asked: the app stays clear; Guide me (or Show pointer) brings help
   const [open, setOpen] = useState<{ record: JobRecord; touched: string[]; expected: JobRecord; onScreen: JobRecord } | null>(null);
   const [walk, setWalk] = useState<GuideStep[] | null>(null);
   const initial = useRef(new Map<number, JobRecord>());

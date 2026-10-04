@@ -16,7 +16,9 @@ export type AuditType =
   | "policy_parsed" | "discovery"
   | "off_record_start" | "off_record_end"
   | "tutor_intervention" | "stuck" | "stuck_feedback"
-  | "scoreboard" | "model_call" | "session_start" | "session_end";
+  | "scoreboard" | "model_call" | "session_start" | "session_end"
+  // Guided teaching: expert records a task / showcases the guide; new hire uses the pointer and Guide me.
+  | "record_task_start" | "record_task_stop" | "showcase_guide" | "show_me" | "show_me_how" | "guide_me_end";
 
 export const AUDIT_ACTORS: readonly AuditActor[] = ["expert", "new_hire", "expertai", "system"];
 export const AUDIT_TYPES: readonly AuditType[] = [
@@ -27,6 +29,7 @@ export const AUDIT_TYPES: readonly AuditType[] = [
   "off_record_start", "off_record_end",
   "tutor_intervention", "stuck", "stuck_feedback",
   "scoreboard", "model_call", "session_start", "session_end",
+  "record_task_start", "record_task_stop", "showcase_guide", "show_me", "show_me_how", "guide_me_end",
 ];
 
 export interface AuditEntry {

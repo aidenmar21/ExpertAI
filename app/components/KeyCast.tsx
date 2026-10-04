@@ -35,6 +35,26 @@ export function KeyCaps({ keys, size = "sm", done }: { keys: string[]; size?: "s
   );
 }
 
+/**
+ * Keys to type. Short entries show as keycaps; long text (a name, an item) shows as one line of typewriter
+ * text so it never wraps into a block that covers the form. `done` lights what is already typed.
+ */
+export function KeyLine({ keys, done, shown }: { keys: string[]; done?: number; shown?: number }) {
+  const text = keys.every((k) => k.length === 1);
+  if (!text || keys.length <= 12) return <KeyCaps keys={shown !== undefined ? keys.slice(0, shown) : keys} size="lg" done={done} />;
+  const visible = shown !== undefined ? keys.slice(0, shown) : keys;
+  const ok = done ?? 0;
+  return (
+    <span className="inline-flex max-w-full items-center rounded-md bg-white px-2.5 py-1 font-mono text-base font-semibold whitespace-pre text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-50">
+      <span className="truncate">
+        <span className="rounded-sm bg-emerald-300 text-emerald-950">{visible.slice(0, ok).join("")}</span>
+        {visible.slice(ok).join("")}
+      </span>
+      {shown !== undefined && shown < keys.length && <span aria-hidden className="ml-0.5 h-5 w-0.5 animate-pulse bg-sky-500" />}
+    </span>
+  );
+}
+
 const EMPTY: TraceEntry[] = [];
 /** Page load on the session clock: the strip shows only what was recorded on this visit. */
 const since = typeof window === "undefined" ? 0 : sessionT();
